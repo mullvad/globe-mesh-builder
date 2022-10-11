@@ -1,0 +1,16 @@
+[package]
+name = "geojson-processor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+vecmat = "0.6.2"
+geojson = "0.22"
+num-traits = "0.2.14"
+earcutr = "0.1.1"
+serde_json = "1.0.86"
+serde = { version = "1.0.145", features = ["derive"] }
+log = "0.4.17"
+clap = { version = "4.0.13", features = ["derive"] }
