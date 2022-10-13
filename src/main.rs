@@ -5,9 +5,11 @@ use clap::Parser;
 use geojson::{GeoJson, Geometry, Value};
 use num_traits::float::Float;
 use std::convert::TryFrom;
-use std::fs;
 use std::path::{Path, PathBuf};
+use std::{fs, thread};
 use vecmat::Vector;
+
+const MAX_EDGE_LENGTH: f64 = 70.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -22,26 +24,75 @@ struct Args {
 }
 
 fn main() {
+    thread::Builder::new()
+        .stack_size(10 * 1024 * 1024)
+        .spawn(|| run())
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+#[inline(never)]
+fn run() {
     let args = Args::parse();
     let mesh: Vec<Vertex> = world_vertices(args.geojson);
+    let mut seen_vertices = Vec::new();
+    let mut output = Output {
+        positions: Vec::new(),
+        indices: Vec::new(),
+    };
+
+    for vertex in &mesh {
+        match seen_vertices.iter().position(|v| v == &vertex) {
+            None => {
+                output.indices.push(seen_vertices.len());
+                output
+                    .positions
+                    .extend(vertex.0.into_array().map(|f| f as f32));
+                seen_vertices.push(vertex);
+            }
+            Some(i) => {
+                output.indices.push(i);
+            }
+        }
+    }
+
+    eprintln!("Total vertices: {}", mesh.len());
+    eprintln!(
+        "Vertices after removing duplicates: {}",
+        seen_vertices.len()
+    );
+    eprintln!("Ratio: {}", seen_vertices.len() as f32 / mesh.len() as f32);
+
     let json_data = if args.pretty {
-        serde_json::to_string_pretty(&mesh).unwrap()
+        serde_json::to_string_pretty(&output).unwrap()
     } else {
-        serde_json::to_string(&mesh).unwrap()
+        serde_json::to_string(&output).unwrap()
     };
     println!("{}", json_data);
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Output {
+    positions: Vec<f32>,
+    indices: Vec<usize>,
 }
 
 /// A struct representing a single vertex in 3D space with a normal.
 ///
 /// The `repr(C)` attribute is required to ensure that the memory layout is
 /// what we expect. Without it, no specific layout is guaranteed.
-#[derive(Copy, Clone, Debug, serde::Serialize)]
+#[derive(Copy, Clone, Debug)]
 #[repr(C)]
-pub struct Vertex {
-    position: [f32; 3],
-    normal: [f32; 3],
+pub struct Vertex(Vector<f64, 3>);
+
+impl PartialEq for Vertex {
+    fn eq(&self, other: &Self) -> bool {
+        (self.0 - other.0).length() <= f64::EPSILON
+    }
 }
+
+impl Eq for Vertex {}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Triangle<T: Float, const N: usize>([Vector<T, N>; 3]);
@@ -72,10 +123,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>) -> Vec<Vertex> {
         let lat = latlong[1];
         let long = latlong[0];
         let vec = latlong2xyz(lat, long);
-        vertices.push(Vertex {
-            position: vec.into_array(),
-            normal: vec.into_array(),
-        });
+        vertices.push(Vertex(vec));
     }
     vertices
 }
@@ -98,7 +146,7 @@ fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
 }
 
 /// Process top-level GeoJSON items
-fn geojson_to_vertices(gj: &GeoJson) -> Vec<f32> {
+fn geojson_to_vertices(gj: &GeoJson) -> Vec<f64> {
     let mut vertices = Vec::new();
     match *gj {
         GeoJson::FeatureCollection(ref ctn) => {
@@ -119,17 +167,17 @@ fn geojson_to_vertices(gj: &GeoJson) -> Vec<f32> {
 }
 
 /// Process GeoJSON geometries
-fn match_geometry(geom: &Geometry) -> Vec<f32> {
+fn match_geometry(geom: &Geometry) -> Vec<f64> {
     let mut vertices = Vec::new();
     match &geom.value {
         Value::Polygon(p) => {
             log::debug!("Matched a Polygon");
-            vertices.extend(process_polygon_with_holes(p, 102.0));
+            vertices.extend(process_polygon_with_holes(p, MAX_EDGE_LENGTH));
         }
         Value::MultiPolygon(polygons) => {
             log::debug!("Matched a MultiPolygon");
             for p in polygons {
-                vertices.extend(process_polygon_with_holes(p, 102.0));
+                vertices.extend(process_polygon_with_holes(p, MAX_EDGE_LENGTH));
             }
         }
         Value::GeometryCollection(ref gc) => {
@@ -146,7 +194,7 @@ fn match_geometry(geom: &Geometry) -> Vec<f32> {
     vertices
 }
 
-fn process_polygon_with_holes(polygon: &geojson::PolygonType, max_edge_length: f64) -> Vec<f32> {
+fn process_polygon_with_holes(polygon: &geojson::PolygonType, max_edge_length: f64) -> Vec<f64> {
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
 
@@ -162,7 +210,7 @@ fn process_polygon_with_holes(polygon: &geojson::PolygonType, max_edge_length: f
         for triangle in triangles {
             let vertices = triangle.vertices();
             for vertex in vertices {
-                output.extend(vertex.as_array().iter().map(|&f| f as f32));
+                output.extend(vertex.as_array().iter());
             }
         }
     }
