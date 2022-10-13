@@ -190,7 +190,7 @@ fn subdivide_sphere_face(
         .map(|v| v.as_array().iter())
         .flatten()
         .cloned()
-        .collect();
+        .collect::<Vec<_>>();
     const DIMS: usize = 2;
     let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &vec![], DIMS);
     for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
