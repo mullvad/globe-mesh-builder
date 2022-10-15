@@ -14,7 +14,7 @@ use std::{fs, thread};
 use total_float_wrap::TotalF64;
 use vecmat::Vector;
 
-const MAX_EDGE_LENGTH: f64 = 0.017453071 * 5.0;
+const MAX_EDGE_LENGTH: f64 = 0.017453071 * 100.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -88,8 +88,6 @@ fn run() {
     }
 }
 
-
-
 #[derive(Debug, serde::Serialize)]
 struct Output {
     positions: Vec<f32>,
@@ -150,14 +148,15 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
         "Parsed and earcutrd GeoJson has {} triangles",
         num_2d_triangles
     );
+
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
     for triangle_2d in world_triangles {
-        let triangle_3d = latlong_triangle_to_sphere(triangle_2d);
         if subdivide {
-            log::debug!("triangle: {:?}", triangle_3d);
-            world_triangles_sphere.extend(subdivide_triangle(triangle_3d));
+            for subdivided_triangle in subdivide_triangle(triangle_2d) {
+                world_triangles_sphere.push(latlong_triangle_to_sphere(subdivided_triangle));
+            }
         } else {
-            world_triangles_sphere.push(triangle_3d);
+            world_triangles_sphere.push(latlong_triangle_to_sphere(triangle_2d));
         }
     }
     log::info!(
@@ -173,7 +172,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     vertices
 }
 
-fn subdivide_triangle(triangle: Triangle<f64, 3>) -> Vec<Triangle<f64, 3>> {
+fn subdivide_triangle(triangle: Triangle<f64, 2>) -> Vec<Triangle<f64, 2>> {
     let [v0, v1, v2] = triangle.vertices();
     let e01 = v1 - v0;
     let e12 = v2 - v1;
@@ -212,11 +211,9 @@ fn subdivide_triangle(triangle: Triangle<f64, 3>) -> Vec<Triangle<f64, 3>> {
 }
 
 /// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
-/// Normalizes the new vector to be of length 1
-fn split_triangle(triangle: Triangle<f64, 3>) -> [Triangle<f64, 3>; 2] {
+fn split_triangle(triangle: Triangle<f64, 2>) -> [Triangle<f64, 2>; 2] {
     let [v0, v1, v2] = triangle.vertices();
-    // let v1v2_midpoint = ((v1 + v2) / 2.0).normalize();
-    let v1v2_midpoint = sphere_midpoint(v1, v2);
+    let v1v2_midpoint = (v1 + v2) / 2.0;
     [
         Triangle::from([v0, v1, v1v2_midpoint]),
         Triangle::from([v0, v1v2_midpoint, v2]),
@@ -253,37 +250,6 @@ fn latlong2xyz(longlat: Vector<f64, 2>) -> Vector<f64, 3> {
     let z = phi.sin() * theta.sin();
     let y = phi.cos();
     Vector::from_array([x, y, z])
-}
-
-fn sphere_midpoint(xyz1: Vector<f64, 3>, xyz2: Vector<f64, 3>) -> Vector<f64, 3> {
-    let p1 = xyz2polar(xyz1);
-    let p2 = xyz2polar(xyz2);
-    let polar = (p1.polar + p2.polar) / 2.0;
-    let azimuthal = (p1.azimuthal + p2.azimuthal) / 2.0;
-    let x = polar.sin() * azimuthal.cos();
-    let y = polar.sin() * azimuthal.sin();
-    let z = polar.cos();
-    Vector::from_array([x, y, z])
-}
-
-struct Polar {
-    // 0 <= polar <= PI
-    polar: f64,
-    // -PI <= azimuthal <= PI
-    azimuthal: f64,
-}
-
-fn xyz2polar(xyz: Vector<f64, 3>) -> Polar {
-    assert!((1.0 - xyz.length()).abs() <= f64::EPSILON);
-    let [x, y, z] = xyz.into_array();
-    let polar = z.acos();
-    let azimuthal = y.atan2(x);
-    assert!(0.0 <= polar && polar <= PI);
-    assert!(-PI <= azimuthal && azimuthal <= PI);
-    Polar {
-        polar,
-        azimuthal,
-    }
 }
 
 #[test]
