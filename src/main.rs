@@ -7,13 +7,14 @@ use num_traits::float::Float;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::f64::consts::PI;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::{fs, thread};
 use total_float_wrap::TotalF64;
 use vecmat::Vector;
 
-const MAX_EDGE_LENGTH: f64 = 0.017453071 * 2.0;
+const MAX_EDGE_LENGTH: f64 = 0.017453071 * 5.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -87,6 +88,8 @@ fn run() {
     }
 }
 
+
+
 #[derive(Debug, serde::Serialize)]
 struct Output {
     positions: Vec<f32>,
@@ -151,6 +154,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     for triangle_2d in world_triangles {
         let triangle_3d = latlong_triangle_to_sphere(triangle_2d);
         if subdivide {
+            log::debug!("triangle: {:?}", triangle_3d);
             world_triangles_sphere.extend(subdivide_triangle(triangle_3d));
         } else {
             world_triangles_sphere.push(triangle_3d);
@@ -211,7 +215,8 @@ fn subdivide_triangle(triangle: Triangle<f64, 3>) -> Vec<Triangle<f64, 3>> {
 /// Normalizes the new vector to be of length 1
 fn split_triangle(triangle: Triangle<f64, 3>) -> [Triangle<f64, 3>; 2] {
     let [v0, v1, v2] = triangle.vertices();
-    let v1v2_midpoint = ((v1 + v2) / 2.0).normalize();
+    // let v1v2_midpoint = ((v1 + v2) / 2.0).normalize();
+    let v1v2_midpoint = sphere_midpoint(v1, v2);
     [
         Triangle::from([v0, v1, v1v2_midpoint]),
         Triangle::from([v0, v1v2_midpoint, v2]),
@@ -230,13 +235,77 @@ fn latlong_triangle_to_sphere(triangle: Triangle<f64, 2>) -> Triangle<f64, 3> {
 
 /// Converts the latitude - longitude coordinates (in degrees) into
 /// xyz coordinates on a sphere with radius 1.
-fn latlong2xyz<T: Float>(longlat: Vector<T, 2>) -> Vector<T, 3> {
-    let [long, lat] = longlat.into_array().map(T::to_radians);
-    let x = lat.cos() * long.sin();
-    let y = -lat.sin();
-    let z = lat.cos() * -long.cos();
+// fn latlong2xyz<T: Float>(longlat: Vector<T, 2>) -> Vector<T, 3> {
+//     let [long, lat] = longlat.into_array().map(T::to_radians);
+//     let x = lat.cos() * long.sin();
+//     let y = -lat.sin();
+//     let z = lat.cos() * -long.cos();
+//     Vector::from_array([x, y, z])
+// }
+
+fn latlong2xyz(longlat: Vector<f64, 2>) -> Vector<f64, 3> {
+    let [long, lat] = longlat.into_array().map(f64::to_radians);
+    // Polar angle. 0 <= φ <= PI = colatitude in geography
+    let phi = (PI / 2.0) - lat;
+    // Azimuthal angle = longitude. 0 <= θ <= 2*PI
+    let theta = long + PI;
+    let x = -(phi.sin() * theta.cos());
+    let z = phi.sin() * theta.sin();
+    let y = phi.cos();
     Vector::from_array([x, y, z])
 }
+
+fn sphere_midpoint(xyz1: Vector<f64, 3>, xyz2: Vector<f64, 3>) -> Vector<f64, 3> {
+    let p1 = xyz2polar(xyz1);
+    let p2 = xyz2polar(xyz2);
+    let polar = (p1.polar + p2.polar) / 2.0;
+    let azimuthal = (p1.azimuthal + p2.azimuthal) / 2.0;
+    let x = polar.sin() * azimuthal.cos();
+    let y = polar.sin() * azimuthal.sin();
+    let z = polar.cos();
+    Vector::from_array([x, y, z])
+}
+
+struct Polar {
+    // 0 <= polar <= PI
+    polar: f64,
+    // -PI <= azimuthal <= PI
+    azimuthal: f64,
+}
+
+fn xyz2polar(xyz: Vector<f64, 3>) -> Polar {
+    assert!((1.0 - xyz.length()).abs() <= f64::EPSILON);
+    let [x, y, z] = xyz.into_array();
+    let polar = z.acos();
+    let azimuthal = y.atan2(x);
+    assert!(0.0 <= polar && polar <= PI);
+    assert!(-PI <= azimuthal && azimuthal <= PI);
+    Polar {
+        polar,
+        azimuthal,
+    }
+}
+
+#[test]
+fn latlong2xyz2latlong() {
+    check(Vector::from_array([0.0, 0.0]));
+    check(Vector::from_array([90.0, 0.0]));
+
+    fn check(longlat: Vector<f64, 2>) {
+        let xyz = latlong2xyz(longlat);
+        let output_longlat = dbg!(xyz2latlong(xyz));
+        assert!((longlat - output_longlat).length() <= f64::EPSILON * 20.0);
+    }
+}
+
+/// A flat world
+// fn latlong2xyz(longlat: Vector<f64, 2>) -> Vector<f64, 3> {
+//     let [long, lat] = longlat.into_array().map(f64::to_radians);
+//     let x = long / std::f64::consts::PI;
+//     let y = lat / std::f64::consts::PI * 2.0;
+//     let z = 0.0;
+//     Vector::from_array([x, y, z])
+// }
 
 fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     let geojson_str = fs::read_to_string(path).unwrap();
