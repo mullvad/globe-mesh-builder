@@ -4,12 +4,16 @@
 use clap::Parser;
 use geojson::{GeoJson, Geometry, Value};
 use num_traits::float::Float;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::{fs, thread};
+use total_float_wrap::TotalF64;
 use vecmat::Vector;
 
-const MAX_EDGE_LENGTH: f64 = 70.0;
+const MAX_EDGE_LENGTH: f64 = 0.017453071 * 2.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -19,14 +23,19 @@ struct Args {
     geojson: PathBuf,
 
     /// If the output should be pretty json or not
-    #[arg(short, long)]
+    #[arg(long)]
     pretty: bool,
+
+    /// If the sphere mapped triangles should be subdivided or not
+    #[arg(long)]
+    subdivide: bool,
 }
 
 fn main() {
+    env_logger::init();
     thread::Builder::new()
         .stack_size(10 * 1024 * 1024)
-        .spawn(|| run())
+        .spawn(run)
         .unwrap()
         .join()
         .unwrap();
@@ -35,47 +44,53 @@ fn main() {
 #[inline(never)]
 fn run() {
     let args = Args::parse();
-    let mesh: Vec<Vertex> = world_vertices(args.geojson);
-    let mut seen_vertices = Vec::new();
+    let mesh: Vec<Vertex> = world_vertices(args.geojson, args.subdivide);
+    let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut output = Output {
         positions: Vec::new(),
         indices: Vec::new(),
     };
 
-    for vertex in &mesh {
-        match seen_vertices.iter().position(|v| v == &vertex) {
-            None => {
-                output.indices.push(seen_vertices.len());
+    let num_2d_vertices = mesh.len();
+    log::info!("Total vertices: {}", num_2d_vertices);
+    let mut next_index: u32 = 0;
+    for vertex in mesh {
+        match seen_vertices.entry(vertex) {
+            Entry::Occupied(entry) => {
+                output.indices.push(*entry.get());
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(next_index);
+                output.indices.push(next_index);
                 output
                     .positions
                     .extend(vertex.0.into_array().map(|f| f as f32));
-                seen_vertices.push(vertex);
-            }
-            Some(i) => {
-                output.indices.push(i);
+                next_index = next_index.checked_add(1).unwrap();
             }
         }
     }
 
-    eprintln!("Total vertices: {}", mesh.len());
     eprintln!(
         "Vertices after removing duplicates: {}",
         seen_vertices.len()
     );
-    eprintln!("Ratio: {}", seen_vertices.len() as f32 / mesh.len() as f32);
+    eprintln!(
+        "Ratio: {}",
+        seen_vertices.len() as f32 / num_2d_vertices as f32
+    );
 
-    let json_data = if args.pretty {
-        serde_json::to_string_pretty(&output).unwrap()
+    let stdout = std::io::stdout().lock();
+    if args.pretty {
+        serde_json::to_writer_pretty(stdout, &output).unwrap();
     } else {
-        serde_json::to_string(&output).unwrap()
-    };
-    println!("{}", json_data);
+        serde_json::to_writer(stdout, &output).unwrap();
+    }
 }
 
 #[derive(Debug, serde::Serialize)]
 struct Output {
     positions: Vec<f32>,
-    indices: Vec<usize>,
+    indices: Vec<u32>,
 }
 
 /// A struct representing a single vertex in 3D space with a normal.
@@ -94,12 +109,21 @@ impl PartialEq for Vertex {
 
 impl Eq for Vertex {}
 
+impl Hash for Vertex {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        let [v0, v1, v2] = self.0.into_array();
+        TotalF64(v0).hash(state);
+        TotalF64(v1).hash(state);
+        TotalF64(v2).hash(state);
+    }
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct Triangle<T: Float, const N: usize>([Vector<T, N>; 3]);
 
 impl<T: Float, const N: usize> Triangle<T, N> {
-    pub fn vertices(&self) -> &[Vector<T, N>; 3] {
-        &self.0
+    pub fn vertices(self) -> [Vector<T, N>; 3] {
+        self.0
     }
 }
 
@@ -115,24 +139,99 @@ impl<T: Float, const N: usize> From<Triangle<T, N>> for [Vector<T, N>; 3] {
     }
 }
 
-pub fn world_vertices(geojson_path: impl AsRef<Path>) -> Vec<Vertex> {
+pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Vertex> {
     let geojson = parse_geojson(geojson_path);
-    let mut vertices = Vec::new();
-    for latlong in geojson_to_vertices(&geojson).chunks_exact(2) {
-        assert_eq!(latlong.len(), 2);
-        let lat = latlong[1];
-        let long = latlong[0];
-        let vec = latlong2xyz(lat, long);
-        vertices.push(Vertex(vec));
+    let world_triangles = geojson_to_triangles(&geojson);
+    let num_2d_triangles = world_triangles.len();
+    log::info!(
+        "Parsed and earcutrd GeoJson has {} triangles",
+        num_2d_triangles
+    );
+    let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
+    for triangle_2d in world_triangles {
+        let triangle_3d = latlong_triangle_to_sphere(triangle_2d);
+        if subdivide {
+            world_triangles_sphere.extend(subdivide_triangle(triangle_3d));
+        } else {
+            world_triangles_sphere.push(triangle_3d);
+        }
     }
+    log::info!(
+        "Mapped {} 2D triangles onto {} 3D triangles on a sphere",
+        num_2d_triangles,
+        world_triangles_sphere.len()
+    );
+    let mut vertices = Vec::with_capacity(world_triangles_sphere.len() * 3);
+    for triangle_3d in world_triangles_sphere {
+        vertices.extend(triangle_3d.vertices().map(Vertex));
+    }
+    log::info!("Converted triangles into {} vertices", vertices.len());
     vertices
+}
+
+fn subdivide_triangle(triangle: Triangle<f64, 3>) -> Vec<Triangle<f64, 3>> {
+    let [v0, v1, v2] = triangle.vertices();
+    let e01 = v1 - v0;
+    let e12 = v2 - v1;
+    let e20 = v0 - v2;
+    let mut output = Vec::new();
+    if e01.length() > MAX_EDGE_LENGTH
+        && e01.length() >= e12.length()
+        && e01.length() >= e20.length()
+    {
+        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v2, v0, v1]));
+        output.extend(subdivide_triangle(new_triangle1));
+        output.extend(subdivide_triangle(new_triangle2));
+    } else if e12.length() > MAX_EDGE_LENGTH
+        && e12.length() >= e20.length()
+        && e12.length() > e01.length()
+    {
+        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v0, v1, v2]));
+        output.extend(subdivide_triangle(new_triangle1));
+        output.extend(subdivide_triangle(new_triangle2));
+    } else if e20.length() > MAX_EDGE_LENGTH
+        && e20.length() >= e01.length()
+        && e20.length() >= e12.length()
+    {
+        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v1, v2, v0]));
+        output.extend(subdivide_triangle(new_triangle1));
+        output.extend(subdivide_triangle(new_triangle2));
+    } else {
+        // No side is too long
+        assert!(e01.length() <= MAX_EDGE_LENGTH);
+        assert!(e12.length() <= MAX_EDGE_LENGTH);
+        assert!(e20.length() <= MAX_EDGE_LENGTH);
+        output.push(triangle);
+    }
+    assert!(!output.is_empty());
+    output
+}
+
+/// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
+/// Normalizes the new vector to be of length 1
+fn split_triangle(triangle: Triangle<f64, 3>) -> [Triangle<f64, 3>; 2] {
+    let [v0, v1, v2] = triangle.vertices();
+    let v1v2_midpoint = ((v1 + v2) / 2.0).normalize();
+    [
+        Triangle::from([v0, v1, v1v2_midpoint]),
+        Triangle::from([v0, v1v2_midpoint, v2]),
+    ]
+}
+
+/// Maps a 2D triangle with latitude and longitude coordinates in degrees onto
+/// a sphere with radius 1
+fn latlong_triangle_to_sphere(triangle: Triangle<f64, 2>) -> Triangle<f64, 3> {
+    let [v0, v1, v2] = triangle.vertices();
+    let v0 = latlong2xyz(v0);
+    let v1 = latlong2xyz(v1);
+    let v2 = latlong2xyz(v2);
+    Triangle::from([v0, v1, v2])
 }
 
 /// Converts the latitude - longitude coordinates (in degrees) into
 /// xyz coordinates on a sphere with radius 1.
-fn latlong2xyz<T: Float>(lat_deg: T, long_deg: T) -> Vector<T, 3> {
-    let lat = lat_deg.to_radians();
-    let long = long_deg.to_radians();
+fn latlong2xyz<T: Float>(longlat: Vector<T, 2>) -> Vector<T, 3> {
+    let [long, lat] = longlat.into_array().map(T::to_radians);
     let x = lat.cos() * long.sin();
     let y = -lat.sin();
     let z = lat.cos() * -long.cos();
@@ -141,12 +240,11 @@ fn latlong2xyz<T: Float>(lat_deg: T, long_deg: T) -> Vector<T, 3> {
 
 fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     let geojson_str = fs::read_to_string(path).unwrap();
-    let geojson = geojson_str.parse::<GeoJson>().unwrap();
-    geojson
+    geojson_str.parse::<GeoJson>().unwrap()
 }
 
 /// Process top-level GeoJSON items
-fn geojson_to_vertices(gj: &GeoJson) -> Vec<f64> {
+fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f64, 2>> {
     let mut vertices = Vec::new();
     match *gj {
         GeoJson::FeatureCollection(ref ctn) => {
@@ -167,17 +265,17 @@ fn geojson_to_vertices(gj: &GeoJson) -> Vec<f64> {
 }
 
 /// Process GeoJSON geometries
-fn match_geometry(geom: &Geometry) -> Vec<f64> {
+fn match_geometry(geom: &Geometry) -> Vec<Triangle<f64, 2>> {
     let mut vertices = Vec::new();
     match &geom.value {
         Value::Polygon(p) => {
             log::debug!("Matched a Polygon");
-            vertices.extend(process_polygon_with_holes(p, MAX_EDGE_LENGTH));
+            vertices.extend(process_polygon_with_holes(p));
         }
         Value::MultiPolygon(polygons) => {
             log::debug!("Matched a MultiPolygon");
             for p in polygons {
-                vertices.extend(process_polygon_with_holes(p, MAX_EDGE_LENGTH));
+                vertices.extend(process_polygon_with_holes(p));
             }
         }
         Value::GeometryCollection(ref gc) => {
@@ -194,187 +292,113 @@ fn match_geometry(geom: &Geometry) -> Vec<f64> {
     vertices
 }
 
-fn process_polygon_with_holes(polygon: &geojson::PolygonType, max_edge_length: f64) -> Vec<f64> {
+/// Takes a 2D polygon, performs earcutr and returns the 2D triangles
+fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f64, 2>> {
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
 
     let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
-    let mut output = Vec::new();
+    let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
     for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
         let v0 = Vector::<f64, 2>::try_from(&flat_vertices[i * dims..i * dims + 2]).unwrap();
         let v1 = Vector::<f64, 2>::try_from(&flat_vertices[j * dims..j * dims + 2]).unwrap();
         let v2 = Vector::<f64, 2>::try_from(&flat_vertices[k * dims..k * dims + 2]).unwrap();
         let triangle = Triangle([v0, v1, v2]);
-        let mut triangles = Vec::new();
-        subdivide_sphere_face(triangle, max_edge_length, &mut triangles);
-        for triangle in triangles {
-            let vertices = triangle.vertices();
-            for vertex in vertices {
-                output.extend(vertex.as_array().iter());
-            }
-        }
-    }
-    output
-}
-
-fn subdivide_sphere_face(
-    triangle: Triangle<f64, 2>,
-    max_edge_length: f64,
-    output: &mut Vec<Triangle<f64, 2>>,
-) {
-    let vertices = cut_too_long_triangle_edges(triangle, max_edge_length);
-    assert!(vertices.len() >= 3);
-    // Base case. Triangle was small enough already
-    if vertices.len() == 3 {
         output.push(triangle);
-        return;
     }
-    log::debug!("A triangle is too large! {:#?} {:#?}", triangle, vertices);
-
-    // If triangle is too large. Cut up the edges so they become smaller and run
-    // the resulting polygon through triangulation.
-    let flat_vertices = vertices
-        .iter()
-        .map(|v| v.as_array().iter())
-        .flatten()
-        .cloned()
-        .collect::<Vec<_>>();
-    const DIMS: usize = 2;
-    let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &vec![], DIMS);
-    for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
-        let v0 = Vector::<f64, 2>::try_from(&flat_vertices[i * DIMS..i * DIMS + 2]).unwrap();
-        let v1 = Vector::<f64, 2>::try_from(&flat_vertices[j * DIMS..j * DIMS + 2]).unwrap();
-        let v2 = Vector::<f64, 2>::try_from(&flat_vertices[k * DIMS..k * DIMS + 2]).unwrap();
-        let sub_triangle = Triangle([v0, v1, v2]);
-        subdivide_sphere_face(sub_triangle, max_edge_length, output);
-    }
-}
-
-fn cut_too_long_triangle_edges(
-    triangle: Triangle<f64, 2>,
-    max_edge_length: f64,
-) -> Vec<Vector<f64, 2>> {
-    let [v0, v1, v2] = <[Vector<f64, 2>; 3]>::from(triangle);
-    let mut output = Vec::with_capacity(3);
-    cut_too_long_edge(v0, v1, max_edge_length, &mut output);
-    cut_too_long_edge(v1, v2, max_edge_length, &mut output);
-    cut_too_long_edge(v2, v0, max_edge_length, &mut output);
     output
-}
-
-/// If the vector between `v0` and `v1` is longer than `max_edge_length` then it's divided into
-/// equal sections. The return vector contains `v0` and any points in between, but not `v1`.
-fn cut_too_long_edge<const N: usize>(
-    v0: Vector<f64, N>,
-    v1: Vector<f64, N>,
-    max_edge_length: f64,
-    output: &mut Vec<Vector<f64, N>>,
-) {
-    assert!(max_edge_length > 0.0);
-    output.push(v0);
-    // A vector pointing from v0 to v1
-    let edge = v1 - v0;
-    let num_sections = (edge.length() / max_edge_length).ceil();
-    if num_sections > 1.0 {
-        output.reserve(num_sections as usize);
-        let section = edge / num_sections;
-        for i in 1..num_sections as usize {
-            output.push(v0 + (i as f64 * section));
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn subdivide_sphere_face_bug() {
-        let triangle: Triangle<f64, 2> = Triangle::from([
-            Vector::from_array([72.07569420700005, 66.235825914]),
-            Vector::from_array([123.27637780050011, 65.45589834200004]),
-            Vector::from_array([174.47706139400017, 64.67597077000009]),
-        ]);
-        let mut output = Vec::new();
-        subdivide_sphere_face(triangle, 102.0, &mut output);
-        eprintln!("Output triangles: {:#?}", output);
-    }
+    // #[test]
+    // fn subdivide_sphere_face_small_enough() {
+    //     //   v2
+    //     //   |\
+    //     // 1 |  \ sqrt(2)
+    //     //   |____\
+    //     //   v0 1 v1
+    //     let v0 = Vector::from_array([0.0, 0.0]);
+    //     let v1 = Vector::from_array([1.0, 0.0]);
+    //     let v2 = Vector::from_array([0.0, 1.0]);
+
+    //     let triangles = subdivide_triangle(Triangle::from([v0, v1, v2]));
+
+    //     // Hypotenuse is too long.
+    //     let hypotenuse_middle_point = Vector::from_array([0.5, 0.5]);
+    //     assert_eq!(
+    //         output,
+    //         &[
+    //             Triangle::from([hypotenuse_middle_point, v2, v0],),
+    //             Triangle::from([v0, v1, hypotenuse_middle_point],),
+    //         ]
+    //     );
+    // }
 
     #[test]
-    fn subdivide_sphere_face_small_enough() {
-        //   v2
-        //   |\
-        // 1 |  \ sqrt(2)
-        //   |____\
-        //   v0 1 v1
-        let v0 = Vector::from_array([0.0, 0.0]);
-        let v1 = Vector::from_array([1.0, 0.0]);
-        let v2 = Vector::from_array([0.0, 1.0]);
-
-        let mut output = Vec::new();
-        subdivide_sphere_face(Triangle::from([v0, v1, v2]), 1.0, &mut output);
-
-        // Hypotenuse is too long.
-        let hypotenuse_middle_point = Vector::from_array([0.5, 0.5]);
+    fn split_triangle_lol() {
+        let v0 = Vector::from_array([0.0, 0.0, 0.0]);
+        let v1 = Vector::from_array([-1.0, -1.0, 0.4]);
+        let v2 = Vector::from_array([1.0, -1.0, 0.5]);
+        let [t1, t2] = split_triangle(Triangle::from([v0, v1, v2]));
         assert_eq!(
-            output,
-            &[
-                Triangle::from([hypotenuse_middle_point, v2, v0],),
-                Triangle::from([v0, v1, hypotenuse_middle_point],),
-            ]
+            t1.vertices(),
+            [v0, v1, Vector::from_array([0.0, -1.0, 0.45])]
         );
     }
 
-    #[test]
-    fn cut_too_long_edges_same_point() {
-        let v0 = Vector::from_array([1.0, 1.0]);
-        let v1 = v0;
+    // #[test]
+    // fn cut_too_long_edges_same_point() {
+    //     let v0 = Vector::from_array([1.0, 1.0]);
+    //     let v1 = v0;
 
-        let mut output = Vec::new();
-        cut_too_long_edge(v0, v1, 0.5, &mut output);
-        assert_eq!(output, &[v0]);
-    }
+    //     let mut output = Vec::new();
+    //     cut_too_long_edge(v0, v1, 0.5, &mut output);
+    //     assert_eq!(output, &[v0]);
+    // }
 
-    #[test]
-    fn cut_too_long_edges_not_too_long() {
-        let v0 = Vector::from_array([1.0, 1.0]);
-        let v1 = Vector::from_array([0.5, 0.5]);
+    // #[test]
+    // fn cut_too_long_edges_not_too_long() {
+    //     let v0 = Vector::from_array([1.0, 1.0]);
+    //     let v1 = Vector::from_array([0.5, 0.5]);
 
-        let mut output = Vec::new();
-        cut_too_long_edge(v0, v1, 0.71, &mut output);
-        assert_eq!(output, &[v0]);
-    }
+    //     let mut output = Vec::new();
+    //     cut_too_long_edge(v0, v1, 0.71, &mut output);
+    //     assert_eq!(output, &[v0]);
+    // }
 
-    #[test]
-    fn cut_too_long_edges_exactly_max_len() {
-        let v0 = Vector::from_array([1.1, 0.0]);
-        let v1 = Vector::from_array([0.0, 0.0]);
+    // #[test]
+    // fn cut_too_long_edges_exactly_max_len() {
+    //     let v0 = Vector::from_array([1.1, 0.0]);
+    //     let v1 = Vector::from_array([0.0, 0.0]);
 
-        let mut output = Vec::new();
-        cut_too_long_edge(v0, v1, 1.1, &mut output);
-        assert_eq!(output, &[v0]);
-    }
+    //     let mut output = Vec::new();
+    //     cut_too_long_edge(v0, v1, 1.1, &mut output);
+    //     assert_eq!(output, &[v0]);
+    // }
 
-    #[test]
-    fn cut_too_long_edges_just_too_long() {
-        let v0 = Vector::from_array([5.0, 0.01]);
-        let v1 = Vector::from_array([0.0, 0.0]);
-        let middle = Vector::from_array([2.5, 0.005]);
+    // #[test]
+    // fn cut_too_long_edges_just_too_long() {
+    //     let v0 = Vector::from_array([5.0, 0.01]);
+    //     let v1 = Vector::from_array([0.0, 0.0]);
+    //     let middle = Vector::from_array([2.5, 0.005]);
 
-        let mut output = Vec::new();
-        cut_too_long_edge(v0, v1, 5.0, &mut output);
-        assert_eq!(output, &[v0, middle]);
-    }
+    //     let mut output = Vec::new();
+    //     cut_too_long_edge(v0, v1, 5.0, &mut output);
+    //     assert_eq!(output, &[v0, middle]);
+    // }
 
-    #[test]
-    fn cut_too_long_edges_much_too_long() {
-        let v0 = Vector::from_array([0.0, 0.0]);
-        let v1 = Vector::from_array([3.0, 0.0]);
-        let section1 = Vector::from_array([1.0, 0.0]);
-        let section2 = Vector::from_array([2.0, 0.0]);
+    // #[test]
+    // fn cut_too_long_edges_much_too_long() {
+    //     let v0 = Vector::from_array([0.0, 0.0]);
+    //     let v1 = Vector::from_array([3.0, 0.0]);
+    //     let section1 = Vector::from_array([1.0, 0.0]);
+    //     let section2 = Vector::from_array([2.0, 0.0]);
 
-        let mut output = Vec::new();
-        cut_too_long_edge(v0, v1, 1.0, &mut output);
-        assert_eq!(output, &[v0, section1, section2]);
-    }
+    //     let mut output = Vec::new();
+    //     cut_too_long_edge(v0, v1, 1.0, &mut output);
+    //     assert_eq!(output, &[v0, section1, section2]);
+    // }
 }
