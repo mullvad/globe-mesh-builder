@@ -14,7 +14,7 @@ use std::{fs, thread};
 use total_float_wrap::TotalF64;
 use vecmat::Vector;
 
-const MAX_EDGE_LENGTH: f64 = 0.017453071 * 100.0;
+const MAX_EDGE_LENGTH_KM: f64 = 250.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -173,41 +173,61 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
 }
 
 fn subdivide_triangle(triangle: Triangle<f64, 2>) -> Vec<Triangle<f64, 2>> {
+    let distance = |v0: Vector<f64, 2>, v1: Vector<f64, 2>| {
+        let [long1, lat1] = v0.into_array();
+        let [long2, lat2] = v1.into_array();
+        haversine_dist_deg(lat1, long1, lat2, long2)
+    };
     let [v0, v1, v2] = triangle.vertices();
-    let e01 = v1 - v0;
-    let e12 = v2 - v1;
-    let e20 = v0 - v2;
+    let e01 = distance(v0, v1);
+    let e12 = distance(v1, v2);
+    let e20 = distance(v2, v0);
     let mut output = Vec::new();
-    if e01.length() > MAX_EDGE_LENGTH
-        && e01.length() >= e12.length()
-        && e01.length() >= e20.length()
-    {
+    if e01 > MAX_EDGE_LENGTH_KM && e01 >= e12 && e01 >= e20 {
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v2, v0, v1]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
-    } else if e12.length() > MAX_EDGE_LENGTH
-        && e12.length() >= e20.length()
-        && e12.length() > e01.length()
-    {
+    } else if e12 > MAX_EDGE_LENGTH_KM && e12 >= e20 && e12 > e01 {
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v0, v1, v2]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
-    } else if e20.length() > MAX_EDGE_LENGTH
-        && e20.length() >= e01.length()
-        && e20.length() >= e12.length()
-    {
+    } else if e20 > MAX_EDGE_LENGTH_KM && e20 >= e01 && e20 >= e12 {
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v1, v2, v0]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
     } else {
         // No side is too long
-        assert!(e01.length() <= MAX_EDGE_LENGTH);
-        assert!(e12.length() <= MAX_EDGE_LENGTH);
-        assert!(e20.length() <= MAX_EDGE_LENGTH);
+        assert!(e01 <= MAX_EDGE_LENGTH_KM);
+        assert!(e12 <= MAX_EDGE_LENGTH_KM);
+        assert!(e20 <= MAX_EDGE_LENGTH_KM);
         output.push(triangle);
     }
     assert!(!output.is_empty());
     output
+}
+
+/// Takes input as latitude and longitude degrees.
+fn haversine_dist_deg(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64 {
+    haversine_dist_rad(
+        lat.to_radians(),
+        lon.to_radians(),
+        other_lat.to_radians(),
+        other_lon.to_radians(),
+    )
+}
+/// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula and https://rosettacode.org/wiki/Haversine_formula#Rust
+/// Takes input as radians, outputs kilometers.
+fn haversine_dist_rad(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64 {
+    const RAIDUS_OF_EARTH: f64 = 6372.8;
+
+    let d_lat = lat - other_lat;
+    let d_lon = lon - other_lon;
+    // Computing the haversine between two points
+    let haversine =
+        (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat.cos() * other_lat.cos();
+
+    // using the haversine to compute the distance between two points
+    haversine.sqrt().asin() * 2.0 * RAIDUS_OF_EARTH
 }
 
 /// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
