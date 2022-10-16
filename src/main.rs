@@ -250,16 +250,6 @@ fn latlong_triangle_to_sphere(triangle: Triangle<f32, 2>) -> Triangle<f32, 3> {
     Triangle::from([v0, v1, v2])
 }
 
-/// Converts the latitude - longitude coordinates (in degrees) into
-/// xyz coordinates on a sphere with radius 1.
-// fn latlong2xyz<T: Float>(longlat: Vector<T, 2>) -> Vector<T, 3> {
-//     let [long, lat] = longlat.into_array().map(T::to_radians);
-//     let x = lat.cos() * long.sin();
-//     let y = -lat.sin();
-//     let z = lat.cos() * -long.cos();
-//     Vector::from_array([x, y, z])
-// }
-
 fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
     let [long, lat] = longlat.into_array().map(f32::to_radians);
     // Polar angle. 0 <= φ <= PI = colatitude in geography
@@ -271,27 +261,6 @@ fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
     let y = phi.cos();
     Vector::from_array([x, y, z])
 }
-
-#[test]
-fn latlong2xyz2latlong() {
-    check(Vector::from_array([0.0, 0.0]));
-    check(Vector::from_array([90.0, 0.0]));
-
-    fn check(longlat: Vector<f32, 2>) {
-        let xyz = latlong2xyz(longlat);
-        let output_longlat = dbg!(xyz2latlong(xyz));
-        assert!((longlat - output_longlat).length() <= f32::EPSILON * 20.0);
-    }
-}
-
-/// A flat world
-// fn latlong2xyz(longlat: Vector<f64, 2>) -> Vector<f64, 3> {
-//     let [long, lat] = longlat.into_array().map(f64::to_radians);
-//     let x = long / std::f64::consts::PI;
-//     let y = lat / std::f64::consts::PI * 2.0;
-//     let z = 0.0;
-//     Vector::from_array([x, y, z])
-// }
 
 fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     let geojson_str = fs::read_to_string(path).unwrap();
@@ -352,7 +321,10 @@ fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f3
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
     // Lower resolution to f32 and use for the rest of the program
-    let flat_vertices = flat_vertices.into_iter().map(|f| f as f32).collect::<Vec<f32>>();
+    let flat_vertices = flat_vertices
+        .into_iter()
+        .map(|f| f as f32)
+        .collect::<Vec<f32>>();
 
     let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
     let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
@@ -364,98 +336,4 @@ fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f3
         output.push(triangle);
     }
     output
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // #[test]
-    // fn subdivide_sphere_face_small_enough() {
-    //     //   v2
-    //     //   |\
-    //     // 1 |  \ sqrt(2)
-    //     //   |____\
-    //     //   v0 1 v1
-    //     let v0 = Vector::from_array([0.0, 0.0]);
-    //     let v1 = Vector::from_array([1.0, 0.0]);
-    //     let v2 = Vector::from_array([0.0, 1.0]);
-
-    //     let triangles = subdivide_triangle(Triangle::from([v0, v1, v2]));
-
-    //     // Hypotenuse is too long.
-    //     let hypotenuse_middle_point = Vector::from_array([0.5, 0.5]);
-    //     assert_eq!(
-    //         output,
-    //         &[
-    //             Triangle::from([hypotenuse_middle_point, v2, v0],),
-    //             Triangle::from([v0, v1, hypotenuse_middle_point],),
-    //         ]
-    //     );
-    // }
-
-    #[test]
-    fn split_triangle_lol() {
-        let v0 = Vector::from_array([0.0, 0.0, 0.0]);
-        let v1 = Vector::from_array([-1.0, -1.0, 0.4]);
-        let v2 = Vector::from_array([1.0, -1.0, 0.5]);
-        let [t1, t2] = split_triangle(Triangle::from([v0, v1, v2]));
-        assert_eq!(
-            t1.vertices(),
-            [v0, v1, Vector::from_array([0.0, -1.0, 0.45])]
-        );
-    }
-
-    // #[test]
-    // fn cut_too_long_edges_same_point() {
-    //     let v0 = Vector::from_array([1.0, 1.0]);
-    //     let v1 = v0;
-
-    //     let mut output = Vec::new();
-    //     cut_too_long_edge(v0, v1, 0.5, &mut output);
-    //     assert_eq!(output, &[v0]);
-    // }
-
-    // #[test]
-    // fn cut_too_long_edges_not_too_long() {
-    //     let v0 = Vector::from_array([1.0, 1.0]);
-    //     let v1 = Vector::from_array([0.5, 0.5]);
-
-    //     let mut output = Vec::new();
-    //     cut_too_long_edge(v0, v1, 0.71, &mut output);
-    //     assert_eq!(output, &[v0]);
-    // }
-
-    // #[test]
-    // fn cut_too_long_edges_exactly_max_len() {
-    //     let v0 = Vector::from_array([1.1, 0.0]);
-    //     let v1 = Vector::from_array([0.0, 0.0]);
-
-    //     let mut output = Vec::new();
-    //     cut_too_long_edge(v0, v1, 1.1, &mut output);
-    //     assert_eq!(output, &[v0]);
-    // }
-
-    // #[test]
-    // fn cut_too_long_edges_just_too_long() {
-    //     let v0 = Vector::from_array([5.0, 0.01]);
-    //     let v1 = Vector::from_array([0.0, 0.0]);
-    //     let middle = Vector::from_array([2.5, 0.005]);
-
-    //     let mut output = Vec::new();
-    //     cut_too_long_edge(v0, v1, 5.0, &mut output);
-    //     assert_eq!(output, &[v0, middle]);
-    // }
-
-    // #[test]
-    // fn cut_too_long_edges_much_too_long() {
-    //     let v0 = Vector::from_array([0.0, 0.0]);
-    //     let v1 = Vector::from_array([3.0, 0.0]);
-    //     let section1 = Vector::from_array([1.0, 0.0]);
-    //     let section2 = Vector::from_array([2.0, 0.0]);
-
-    //     let mut output = Vec::new();
-    //     cut_too_long_edge(v0, v1, 1.0, &mut output);
-    //     assert_eq!(output, &[v0, section1, section2]);
-    // }
 }
