@@ -40,27 +40,33 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
     let d01 = haversine_distance(c0, c1);
     let d12 = haversine_distance(c1, c2);
     let d20 = haversine_distance(c2, c0);
+
+    if d01 <= MAX_EDGE_LENGTH_KM && d12 <= MAX_EDGE_LENGTH_KM && d20 <= MAX_EDGE_LENGTH_KM {
+        // No side is too long. Base case, no triangle splitting will happen
+        return vec![triangle];
+    }
+
+    // At least one edge is too long. Rotate it so that it has the longest
+    // side furthes away from c0, to fit with `split_triangle`
+    let rotated_triangle = if d01 >= d12 && d01 >= d20 {
+        // The side between c0 and c1 is the longest
+        Triangle::from([c2, c0, c1])
+    } else if d12 >= d20 && d12 > d01 {
+        // The side between c1 and c2 is the longest
+        Triangle::from([c0, c1, c2])
+    } else if d20 >= d01 && d20 >= d12 {
+        // The side between c2 and c0 is the longest
+        Triangle::from([c1, c2, c0])
+    } else {
+        unreachable!("One edge has to be the longest")
+    };
+
+    // `output` will have at least two entries.
     let mut output = Vec::with_capacity(2);
 
-    if d01 > MAX_EDGE_LENGTH_KM && d01 >= d12 && d01 >= d20 {
-        // The side between c0 and c1 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([c2, c0, c1]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else if d12 > MAX_EDGE_LENGTH_KM && d12 >= d20 && d12 > d01 {
-        // The side between c1 and c2 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([c0, c1, c2]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else if d20 > MAX_EDGE_LENGTH_KM && d20 >= d01 && d20 >= d12 {
-        // The side between c2 and c0 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([c1, c2, c0]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else {
-        // No side is too long
-        output.push(triangle);
-    }
+    let [new_triangle1, new_triangle2] = split_triangle(rotated_triangle);
+    output.extend(subdivide_triangle(new_triangle1));
+    output.extend(subdivide_triangle(new_triangle2));
     output
 }
 

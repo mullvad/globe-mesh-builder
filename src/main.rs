@@ -126,14 +126,10 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     vertices
 }
 
-/// Maps a 2D triangle with latitude and longitude coordinates in radians onto
+/// Maps a 2D geo triangle with latitude and longitude coordinates in radians onto
 /// a sphere with radius 1
 fn geo_triangle_to_sphere(triangle: geo::Triangle) -> Triangle {
-    let [c0, c1, c2] = triangle.to_coordinates();
-    let v0 = latlong2xyz(c0);
-    let v1 = latlong2xyz(c1);
-    let v2 = latlong2xyz(c2);
-    Triangle::from([v0, v1, v2])
+    Triangle::from(triangle.to_coordinates().map(latlong2xyz))
 }
 
 /// Maps a geographical coordinate represented in radians onto a sphere
