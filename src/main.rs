@@ -7,14 +7,14 @@ use num_traits::float::Float;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::convert::TryFrom;
-use std::f64::consts::PI;
+use std::f32::consts::PI;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::{fs, thread};
-use total_float_wrap::TotalF64;
+use total_float_wrap::TotalF32;
 use vecmat::Vector;
 
-const MAX_EDGE_LENGTH_KM: f64 = 250.0;
+const MAX_EDGE_LENGTH_KM: f32 = 250.0;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -100,11 +100,11 @@ struct Output {
 /// what we expect. Without it, no specific layout is guaranteed.
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
-pub struct Vertex(Vector<f64, 3>);
+pub struct Vertex(Vector<f32, 3>);
 
 impl PartialEq for Vertex {
     fn eq(&self, other: &Self) -> bool {
-        (self.0 - other.0).length() <= f64::EPSILON
+        (self.0 - other.0).length() <= f32::EPSILON
     }
 }
 
@@ -113,9 +113,9 @@ impl Eq for Vertex {}
 impl Hash for Vertex {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         let [v0, v1, v2] = self.0.into_array();
-        TotalF64(v0).hash(state);
-        TotalF64(v1).hash(state);
-        TotalF64(v2).hash(state);
+        TotalF32(v0).hash(state);
+        TotalF32(v1).hash(state);
+        TotalF32(v2).hash(state);
     }
 }
 
@@ -172,8 +172,8 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     vertices
 }
 
-fn subdivide_triangle(triangle: Triangle<f64, 2>) -> Vec<Triangle<f64, 2>> {
-    let distance = |v0: Vector<f64, 2>, v1: Vector<f64, 2>| {
+fn subdivide_triangle(triangle: Triangle<f32, 2>) -> Vec<Triangle<f32, 2>> {
+    let distance = |v0: Vector<f32, 2>, v1: Vector<f32, 2>| {
         let [long1, lat1] = v0.into_array();
         let [long2, lat2] = v1.into_array();
         haversine_dist_deg(lat1, long1, lat2, long2)
@@ -207,7 +207,7 @@ fn subdivide_triangle(triangle: Triangle<f64, 2>) -> Vec<Triangle<f64, 2>> {
 }
 
 /// Takes input as latitude and longitude degrees.
-fn haversine_dist_deg(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64 {
+fn haversine_dist_deg(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
     haversine_dist_rad(
         lat.to_radians(),
         lon.to_radians(),
@@ -217,8 +217,8 @@ fn haversine_dist_deg(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64
 }
 /// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula and https://rosettacode.org/wiki/Haversine_formula#Rust
 /// Takes input as radians, outputs kilometers.
-fn haversine_dist_rad(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64 {
-    const RAIDUS_OF_EARTH: f64 = 6372.8;
+fn haversine_dist_rad(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
+    const RAIDUS_OF_EARTH: f32 = 6372.8;
 
     let d_lat = lat - other_lat;
     let d_lon = lon - other_lon;
@@ -231,7 +231,7 @@ fn haversine_dist_rad(lat: f64, lon: f64, other_lat: f64, other_lon: f64) -> f64
 }
 
 /// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
-fn split_triangle(triangle: Triangle<f64, 2>) -> [Triangle<f64, 2>; 2] {
+fn split_triangle(triangle: Triangle<f32, 2>) -> [Triangle<f32, 2>; 2] {
     let [v0, v1, v2] = triangle.vertices();
     let v1v2_midpoint = (v1 + v2) / 2.0;
     [
@@ -242,7 +242,7 @@ fn split_triangle(triangle: Triangle<f64, 2>) -> [Triangle<f64, 2>; 2] {
 
 /// Maps a 2D triangle with latitude and longitude coordinates in degrees onto
 /// a sphere with radius 1
-fn latlong_triangle_to_sphere(triangle: Triangle<f64, 2>) -> Triangle<f64, 3> {
+fn latlong_triangle_to_sphere(triangle: Triangle<f32, 2>) -> Triangle<f32, 3> {
     let [v0, v1, v2] = triangle.vertices();
     let v0 = latlong2xyz(v0);
     let v1 = latlong2xyz(v1);
@@ -260,8 +260,8 @@ fn latlong_triangle_to_sphere(triangle: Triangle<f64, 2>) -> Triangle<f64, 3> {
 //     Vector::from_array([x, y, z])
 // }
 
-fn latlong2xyz(longlat: Vector<f64, 2>) -> Vector<f64, 3> {
-    let [long, lat] = longlat.into_array().map(f64::to_radians);
+fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
+    let [long, lat] = longlat.into_array().map(f32::to_radians);
     // Polar angle. 0 <= φ <= PI = colatitude in geography
     let phi = (PI / 2.0) - lat;
     // Azimuthal angle = longitude. 0 <= θ <= 2*PI
@@ -277,10 +277,10 @@ fn latlong2xyz2latlong() {
     check(Vector::from_array([0.0, 0.0]));
     check(Vector::from_array([90.0, 0.0]));
 
-    fn check(longlat: Vector<f64, 2>) {
+    fn check(longlat: Vector<f32, 2>) {
         let xyz = latlong2xyz(longlat);
         let output_longlat = dbg!(xyz2latlong(xyz));
-        assert!((longlat - output_longlat).length() <= f64::EPSILON * 20.0);
+        assert!((longlat - output_longlat).length() <= f32::EPSILON * 20.0);
     }
 }
 
@@ -299,7 +299,7 @@ fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
 }
 
 /// Process top-level GeoJSON items
-fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f64, 2>> {
+fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f32, 2>> {
     let mut vertices = Vec::new();
     match *gj {
         GeoJson::FeatureCollection(ref ctn) => {
@@ -320,7 +320,7 @@ fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f64, 2>> {
 }
 
 /// Process GeoJSON geometries
-fn match_geometry(geom: &Geometry) -> Vec<Triangle<f64, 2>> {
+fn match_geometry(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
     let mut vertices = Vec::new();
     match &geom.value {
         Value::Polygon(p) => {
@@ -348,16 +348,18 @@ fn match_geometry(geom: &Geometry) -> Vec<Triangle<f64, 2>> {
 }
 
 /// Takes a 2D polygon, performs earcutr and returns the 2D triangles
-fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f64, 2>> {
+fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f32, 2>> {
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
+    // Lower resolution to f32 and use for the rest of the program
+    let flat_vertices = flat_vertices.into_iter().map(|f| f as f32).collect::<Vec<f32>>();
 
     let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
     let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
     for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
-        let v0 = Vector::<f64, 2>::try_from(&flat_vertices[i * dims..i * dims + 2]).unwrap();
-        let v1 = Vector::<f64, 2>::try_from(&flat_vertices[j * dims..j * dims + 2]).unwrap();
-        let v2 = Vector::<f64, 2>::try_from(&flat_vertices[k * dims..k * dims + 2]).unwrap();
+        let v0 = Vector::<f32, 2>::try_from(&flat_vertices[i * dims..i * dims + 2]).unwrap();
+        let v1 = Vector::<f32, 2>::try_from(&flat_vertices[j * dims..j * dims + 2]).unwrap();
+        let v2 = Vector::<f32, 2>::try_from(&flat_vertices[k * dims..k * dims + 2]).unwrap();
         let triangle = Triangle([v0, v1, v2]);
         output.push(triangle);
     }
