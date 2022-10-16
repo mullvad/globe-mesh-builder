@@ -2,17 +2,15 @@
 #![feature(slice_as_chunks)]
 
 use clap::Parser;
-use geojson::{GeoJson, Geometry, Value};
-use num_traits::float::Float;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::f32::consts::PI;
-use std::hash::Hash;
 use std::path::{Path, PathBuf};
-use std::{fs, thread};
-use total_float_wrap::TotalF32;
-use vecmat::Vector;
+
+mod geo;
+mod linalg;
+
+use linalg::{Triangle, Vector, Vertex};
 
 const MAX_EDGE_LENGTH_KM: f32 = 250.0;
 
@@ -27,25 +25,40 @@ struct Args {
     #[arg(long)]
     pretty: bool,
 
-    /// If the sphere mapped triangles should be subdivided or not
+    /// If too long triangle edges should be cut down into smaller sections
+    /// to not take a too noticeable shortcut through the sphere.
     #[arg(long)]
     subdivide: bool,
 }
 
-fn main() {
-    env_logger::init();
-    thread::Builder::new()
-        .stack_size(10 * 1024 * 1024)
-        .spawn(run)
-        .unwrap()
-        .join()
-        .unwrap();
+/// The structur this program outputs (in JSON format).
+#[derive(Debug, serde::Serialize)]
+struct Output {
+    /// A vector with vertice float values for OpenGL to render. each group of three
+    /// floats is one vertice. So `(positions[x], positions[x+1], positions[x+2])` is
+    /// one vertice.
+    positions: Vec<f32>,
+    /// The indexes of the vertices that makes up the triangles of the earth.
+    ///
+    /// # Example
+    ///
+    /// If `[indices[0], indices[1], indices[2]] == [7, 2, 0]`,
+    /// then the vertices for the first triangle to draw is:
+    /// `vertice0 = [positions[7*3], positions[7*3+1], positions[7*3+2]]
+    /// `vertice1 = [positions[2*3], positions[2*3+1], positions[2*3+2]]
+    /// `vertice2 = [positions[0*3], positions[0*3+1], positions[0*3+2]]
+    ///
+    /// The `*3` part comes from the fact that the `indices` says which vertice,
+    /// to pull from `positions`, and each vertice occupies three elements in `positions`.
+    indices: Vec<u32>,
 }
 
-#[inline(never)]
-fn run() {
+fn main() {
+    env_logger::init();
     let args = Args::parse();
+
     let mesh: Vec<Vertex> = world_vertices(args.geojson, args.subdivide);
+
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut output = Output {
         positions: Vec::new(),
@@ -63,9 +76,7 @@ fn run() {
             Entry::Vacant(entry) => {
                 entry.insert(next_index);
                 output.indices.push(next_index);
-                output
-                    .positions
-                    .extend(vertex.0.into_array().map(|f| f as f32));
+                output.positions.extend(vertex.to_vector().into_array());
                 next_index = next_index.checked_add(1).unwrap();
             }
         }
@@ -88,57 +99,8 @@ fn run() {
     }
 }
 
-#[derive(Debug, serde::Serialize)]
-struct Output {
-    positions: Vec<f32>,
-    indices: Vec<u32>,
-}
-
-/// A struct representing a single vertex in 3D space.
-#[derive(Copy, Clone, Debug)]
-pub struct Vertex(Vector<f32, 3>);
-
-impl PartialEq for Vertex {
-    fn eq(&self, other: &Self) -> bool {
-        (self.0 - other.0).length() <= f32::EPSILON
-    }
-}
-
-impl Eq for Vertex {}
-
-impl Hash for Vertex {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let [v0, v1, v2] = self.0.into_array();
-        TotalF32(v0).hash(state);
-        TotalF32(v1).hash(state);
-        TotalF32(v2).hash(state);
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Triangle<T: Float, const N: usize>([Vector<T, N>; 3]);
-
-impl<T: Float, const N: usize> Triangle<T, N> {
-    pub fn vertices(self) -> [Vector<T, N>; 3] {
-        self.0
-    }
-}
-
-impl<T: Float, const N: usize> From<[Vector<T, N>; 3]> for Triangle<T, N> {
-    fn from(vertices: [Vector<T, N>; 3]) -> Self {
-        Triangle(vertices)
-    }
-}
-
-impl<T: Float, const N: usize> From<Triangle<T, N>> for [Vector<T, N>; 3] {
-    fn from(triangle: Triangle<T, N>) -> Self {
-        triangle.0
-    }
-}
-
 pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Vertex> {
-    let geojson = parse_geojson(geojson_path);
-    let world_triangles = geojson_to_triangles(&geojson);
+    let world_triangles = geo::triangulate_geojson(geojson_path);
     let num_2d_triangles = world_triangles.len();
     log::info!(
         "Parsed and earcutrd GeoJson has {} triangles",
@@ -162,7 +124,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     );
     let mut vertices = Vec::with_capacity(world_triangles_sphere.len() * 3);
     for triangle_3d in world_triangles_sphere {
-        vertices.extend(triangle_3d.vertices().map(Vertex));
+        vertices.extend(triangle_3d.to_vertices().map(Vertex::from));
     }
     log::info!("Converted triangles into {} vertices", vertices.len());
     vertices
@@ -174,9 +136,9 @@ fn subdivide_triangle(triangle: Triangle<f32, 2>) -> Vec<Triangle<f32, 2>> {
     let distance = |v0: Vector<f32, 2>, v1: Vector<f32, 2>| {
         let [long1, lat1] = v0.into_array();
         let [long2, lat2] = v1.into_array();
-        haversine_dist_rad(lat1, long1, lat2, long2)
+        haversine_dist(lat1, long1, lat2, long2)
     };
-    let [v0, v1, v2] = triangle.vertices();
+    let [v0, v1, v2] = triangle.to_vertices();
     let d01 = distance(v0, v1);
     let d12 = distance(v1, v2);
     let d20 = distance(v2, v0);
@@ -207,7 +169,7 @@ fn subdivide_triangle(triangle: Triangle<f32, 2>) -> Vec<Triangle<f32, 2>> {
 /// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula
 /// and https://rosettacode.org/wiki/Haversine_formula#Rust
 /// Takes input as radians, outputs kilometers.
-fn haversine_dist_rad(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
+fn haversine_dist(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
     const RAIDUS_OF_EARTH: f32 = 6372.8;
 
     let d_lat = lat - other_lat;
@@ -222,7 +184,7 @@ fn haversine_dist_rad(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32
 
 /// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
 fn split_triangle(triangle: Triangle<f32, 2>) -> [Triangle<f32, 2>; 2] {
-    let [v0, v1, v2] = triangle.vertices();
+    let [v0, v1, v2] = triangle.to_vertices();
     let v1v2_midpoint = (v1 + v2) / 2.0;
     [
         Triangle::from([v0, v1, v1v2_midpoint]),
@@ -233,7 +195,7 @@ fn split_triangle(triangle: Triangle<f32, 2>) -> [Triangle<f32, 2>; 2] {
 /// Maps a 2D triangle with latitude and longitude coordinates in degrees onto
 /// a sphere with radius 1
 fn latlong_triangle_to_sphere(triangle: Triangle<f32, 2>) -> Triangle<f32, 3> {
-    let [v0, v1, v2] = triangle.vertices();
+    let [v0, v1, v2] = triangle.to_vertices();
     let v0 = latlong2xyz(v0);
     let v1 = latlong2xyz(v1);
     let v2 = latlong2xyz(v2);
@@ -250,82 +212,4 @@ fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
     let z = phi.sin() * theta.sin();
     let y = phi.cos();
     Vector::from_array([x, y, z])
-}
-
-fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
-    let geojson_str = fs::read_to_string(path).unwrap();
-    geojson_str.parse::<GeoJson>().unwrap()
-}
-
-/// Process top-level GeoJSON items and returns a vector of 2D triangles
-/// with the coordinates in radians
-fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f32, 2>> {
-    let mut vertices = Vec::new();
-    match *gj {
-        GeoJson::FeatureCollection(ref ctn) => {
-            for feature in &ctn.features {
-                if let Some(ref geom) = feature.geometry {
-                    vertices.extend(geometry_to_triangles(geom));
-                }
-            }
-        }
-        GeoJson::Feature(ref feature) => {
-            if let Some(ref geom) = feature.geometry {
-                vertices.extend(geometry_to_triangles(geom));
-            }
-        }
-        GeoJson::Geometry(ref geometry) => vertices.extend(geometry_to_triangles(geometry)),
-    }
-    vertices
-}
-
-/// Process GeoJSON geometries and returns a vector of 2D triangles with
-/// the coordinates in radians.
-fn geometry_to_triangles(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
-    let mut vertices = Vec::new();
-    match &geom.value {
-        Value::Polygon(p) => {
-            log::debug!("Matched a Polygon");
-            vertices.extend(process_polygon_with_holes(p));
-        }
-        Value::MultiPolygon(polygons) => {
-            log::debug!("Matched a MultiPolygon");
-            for p in polygons {
-                vertices.extend(process_polygon_with_holes(p));
-            }
-        }
-        Value::GeometryCollection(ref gc) => {
-            log::debug!("Matched a GeometryCollection");
-            // GeometryCollections contain other Geometry types, and can nest
-            // we deal with this by recursively processing each geometry
-            for geometry in gc {
-                vertices.extend(geometry_to_triangles(geometry))
-            }
-        }
-        // Point, LineString, and their Multi– counterparts
-        _ => todo!("Matched some other geometry"),
-    }
-    vertices
-}
-
-/// Takes a 2D polygon, performs earcutr and returns the 2D triangles with radian coordinates.
-fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f32, 2>> {
-    let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
-    assert_eq!(dims, 2);
-    // Convert coordinates to radians and lower resolution to f32 and use for the rest of the program
-    let flat_vertices = flat_vertices
-        .into_iter()
-        .map(|f: f64| f.to_radians() as f32)
-        .collect::<Vec<_>>();
-
-    let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
-    let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
-    for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
-        let v0 = Vector::<f32, 2>::try_from(&flat_vertices[i * dims..i * dims + 2]).unwrap();
-        let v1 = Vector::<f32, 2>::try_from(&flat_vertices[j * dims..j * dims + 2]).unwrap();
-        let v2 = Vector::<f32, 2>::try_from(&flat_vertices[k * dims..k * dims + 2]).unwrap();
-        let triangle = Triangle([v0, v1, v2]);
-        output.push(triangle);
-    }
-    output
 }
