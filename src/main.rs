@@ -12,8 +12,6 @@ mod linalg;
 
 use linalg::{Triangle, Vector, Vertex};
 
-const MAX_EDGE_LENGTH_KM: f32 = 250.0;
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -65,12 +63,13 @@ fn main() {
         indices: Vec::new(),
     };
 
-    let num_2d_vertices = mesh.len();
-    log::info!("Total vertices: {}", num_2d_vertices);
+    let num_3d_vertices = mesh.len();
     let mut next_index: u32 = 0;
     for vertex in mesh {
         match seen_vertices.entry(vertex) {
             Entry::Occupied(entry) => {
+                // This vertex is already in `output.positions`,
+                // just push the index
                 output.indices.push(*entry.get());
             }
             Entry::Vacant(entry) => {
@@ -82,13 +81,10 @@ fn main() {
         }
     }
 
-    eprintln!(
-        "Vertices after removing duplicates: {}",
-        seen_vertices.len()
-    );
-    eprintln!(
-        "Ratio: {}",
-        seen_vertices.len() as f32 / num_2d_vertices as f32
+    log::info!(
+        "Vertices after removing duplicates: {}. {:.1}% of original vertices",
+        seen_vertices.len(),
+        seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
 
     let stdout = std::io::stdout().lock();
@@ -110,11 +106,11 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
     for triangle_2d in world_triangles {
         if subdivide {
-            for subdivided_triangle in subdivide_triangle(triangle_2d) {
-                world_triangles_sphere.push(latlong_triangle_to_sphere(subdivided_triangle));
+            for subdivided_triangle in geo::subdivide_triangle(triangle_2d) {
+                world_triangles_sphere.push(geo_triangle_to_sphere(subdivided_triangle));
             }
         } else {
-            world_triangles_sphere.push(latlong_triangle_to_sphere(triangle_2d));
+            world_triangles_sphere.push(geo_triangle_to_sphere(triangle_2d));
         }
     }
     log::info!(
@@ -130,86 +126,25 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     vertices
 }
 
-/// Takes a triangle as input, finds the longest side of it and if that is longer
-/// than MAX_EDGE_LENGTH_KM in haversine distance, cut it into two, and recurse.
-fn subdivide_triangle(triangle: Triangle<f32, 2>) -> Vec<Triangle<f32, 2>> {
-    let distance = |v0: Vector<f32, 2>, v1: Vector<f32, 2>| {
-        let [long1, lat1] = v0.into_array();
-        let [long2, lat2] = v1.into_array();
-        haversine_dist(lat1, long1, lat2, long2)
-    };
-    let [v0, v1, v2] = triangle.to_vertices();
-    let d01 = distance(v0, v1);
-    let d12 = distance(v1, v2);
-    let d20 = distance(v2, v0);
-    let mut output = Vec::with_capacity(2);
-
-    if d01 > MAX_EDGE_LENGTH_KM && d01 >= d12 && d01 >= d20 {
-        // The side between v0 and v1 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v2, v0, v1]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else if d12 > MAX_EDGE_LENGTH_KM && d12 >= d20 && d12 > d01 {
-        // The side between v1 and v2 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v0, v1, v2]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else if d20 > MAX_EDGE_LENGTH_KM && d20 >= d01 && d20 >= d12 {
-        // The side between v2 and v0 is the longest, and it's too long
-        let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v1, v2, v0]));
-        output.extend(subdivide_triangle(new_triangle1));
-        output.extend(subdivide_triangle(new_triangle2));
-    } else {
-        // No side is too long
-        output.push(triangle);
-    }
-    output
-}
-
-/// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula
-/// and https://rosettacode.org/wiki/Haversine_formula#Rust
-/// Takes input as radians, outputs kilometers.
-fn haversine_dist(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
-    const RAIDUS_OF_EARTH: f32 = 6372.8;
-
-    let d_lat = lat - other_lat;
-    let d_lon = lon - other_lon;
-    // Computing the haversine between two points
-    let haversine =
-        (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat.cos() * other_lat.cos();
-
-    // using the haversine to compute the distance between two points
-    haversine.sqrt().asin() * 2.0 * RAIDUS_OF_EARTH
-}
-
-/// Splits a triangle into two. The edge that is cut into two is the one between v1 and v2.
-fn split_triangle(triangle: Triangle<f32, 2>) -> [Triangle<f32, 2>; 2] {
-    let [v0, v1, v2] = triangle.to_vertices();
-    let v1v2_midpoint = (v1 + v2) / 2.0;
-    [
-        Triangle::from([v0, v1, v1v2_midpoint]),
-        Triangle::from([v0, v1v2_midpoint, v2]),
-    ]
-}
-
-/// Maps a 2D triangle with latitude and longitude coordinates in degrees onto
+/// Maps a 2D triangle with latitude and longitude coordinates in radians onto
 /// a sphere with radius 1
-fn latlong_triangle_to_sphere(triangle: Triangle<f32, 2>) -> Triangle<f32, 3> {
-    let [v0, v1, v2] = triangle.to_vertices();
-    let v0 = latlong2xyz(v0);
-    let v1 = latlong2xyz(v1);
-    let v2 = latlong2xyz(v2);
+fn geo_triangle_to_sphere(triangle: geo::Triangle) -> Triangle {
+    let [c0, c1, c2] = triangle.to_coordinates();
+    let v0 = latlong2xyz(c0);
+    let v1 = latlong2xyz(c1);
+    let v2 = latlong2xyz(c2);
     Triangle::from([v0, v1, v2])
 }
 
-fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
-    let [long, lat] = longlat.into_array();
+/// Maps a geographical coordinate represented in radians onto a sphere
+/// with radius 1.0, and returns the 3D vector
+fn latlong2xyz(c: geo::Coordinate) -> Vertex {
     // Polar angle. 0 <= φ <= PI = colatitude in geography
-    let phi = (PI / 2.0) - lat;
+    let phi = (PI / 2.0) - c.lat;
     // Azimuthal angle = longitude. 0 <= θ <= 2*PI
-    let theta = long + PI;
+    let theta = c.long + PI;
     let x = -(phi.sin() * theta.cos());
     let z = phi.sin() * theta.sin();
     let y = phi.cos();
-    Vector::from_array([x, y, z])
+    Vertex::from(Vector::from_array([x, y, z]))
 }

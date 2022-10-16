@@ -1,4 +1,3 @@
-use num_traits::float::Float;
 use std::hash::Hash;
 use total_float_wrap::TotalF32;
 pub use vecmat::Vector;
@@ -36,25 +35,18 @@ impl Hash for Vertex {
     }
 }
 
-/// An triangle in N dimensions. Consists of three vectors with float
-/// precision T
+/// An triangle in 3 dimensions.
 #[derive(Copy, Clone, Debug)]
-pub struct Triangle<T: Float, const N: usize>([Vector<T, N>; 3]);
+pub struct Triangle([Vertex; 3]);
 
-impl<T: Float, const N: usize> Triangle<T, N> {
-    pub fn to_vertices(self) -> [Vector<T, N>; 3] {
+impl Triangle {
+    pub fn to_vertices(self) -> [Vertex; 3] {
         self.0
     }
 }
 
-impl<T: Float, const N: usize> From<[Vector<T, N>; 3]> for Triangle<T, N> {
-    fn from(vertices: [Vector<T, N>; 3]) -> Self {
+impl From<[Vertex; 3]> for Triangle {
+    fn from(vertices: [Vertex; 3]) -> Self {
         Triangle(vertices)
-    }
-}
-
-impl<T: Float, const N: usize> From<Triangle<T, N>> for [Vector<T, N>; 3] {
-    fn from(triangle: Triangle<T, N>) -> Self {
-        triangle.0
     }
 }
