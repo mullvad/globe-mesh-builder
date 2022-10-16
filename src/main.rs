@@ -94,12 +94,8 @@ struct Output {
     indices: Vec<u32>,
 }
 
-/// A struct representing a single vertex in 3D space with a normal.
-///
-/// The `repr(C)` attribute is required to ensure that the memory layout is
-/// what we expect. Without it, no specific layout is guaranteed.
+/// A struct representing a single vertex in 3D space.
 #[derive(Copy, Clone, Debug)]
-#[repr(C)]
 pub struct Vertex(Vector<f32, 3>);
 
 impl PartialEq for Vertex {
@@ -172,50 +168,44 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     vertices
 }
 
+/// Takes a triangle as input, finds the longest side of it and if that is longer
+/// than MAX_EDGE_LENGTH_KM in haversine distance, cut it into two, and recurse.
 fn subdivide_triangle(triangle: Triangle<f32, 2>) -> Vec<Triangle<f32, 2>> {
     let distance = |v0: Vector<f32, 2>, v1: Vector<f32, 2>| {
         let [long1, lat1] = v0.into_array();
         let [long2, lat2] = v1.into_array();
-        haversine_dist_deg(lat1, long1, lat2, long2)
+        haversine_dist_rad(lat1, long1, lat2, long2)
     };
     let [v0, v1, v2] = triangle.vertices();
-    let e01 = distance(v0, v1);
-    let e12 = distance(v1, v2);
-    let e20 = distance(v2, v0);
-    let mut output = Vec::new();
-    if e01 > MAX_EDGE_LENGTH_KM && e01 >= e12 && e01 >= e20 {
+    let d01 = distance(v0, v1);
+    let d12 = distance(v1, v2);
+    let d20 = distance(v2, v0);
+    let mut output = Vec::with_capacity(2);
+
+    if d01 > MAX_EDGE_LENGTH_KM && d01 >= d12 && d01 >= d20 {
+        // The side between v0 and v1 is the longest, and it's too long
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v2, v0, v1]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
-    } else if e12 > MAX_EDGE_LENGTH_KM && e12 >= e20 && e12 > e01 {
+    } else if d12 > MAX_EDGE_LENGTH_KM && d12 >= d20 && d12 > d01 {
+        // The side between v1 and v2 is the longest, and it's too long
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v0, v1, v2]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
-    } else if e20 > MAX_EDGE_LENGTH_KM && e20 >= e01 && e20 >= e12 {
+    } else if d20 > MAX_EDGE_LENGTH_KM && d20 >= d01 && d20 >= d12 {
+        // The side between v2 and v0 is the longest, and it's too long
         let [new_triangle1, new_triangle2] = split_triangle(Triangle::from([v1, v2, v0]));
         output.extend(subdivide_triangle(new_triangle1));
         output.extend(subdivide_triangle(new_triangle2));
     } else {
         // No side is too long
-        assert!(e01 <= MAX_EDGE_LENGTH_KM);
-        assert!(e12 <= MAX_EDGE_LENGTH_KM);
-        assert!(e20 <= MAX_EDGE_LENGTH_KM);
         output.push(triangle);
     }
-    assert!(!output.is_empty());
     output
 }
 
-/// Takes input as latitude and longitude degrees.
-fn haversine_dist_deg(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
-    haversine_dist_rad(
-        lat.to_radians(),
-        lon.to_radians(),
-        other_lat.to_radians(),
-        other_lon.to_radians(),
-    )
-}
-/// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula and https://rosettacode.org/wiki/Haversine_formula#Rust
+/// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula
+/// and https://rosettacode.org/wiki/Haversine_formula#Rust
 /// Takes input as radians, outputs kilometers.
 fn haversine_dist_rad(lat: f32, lon: f32, other_lat: f32, other_lon: f32) -> f32 {
     const RAIDUS_OF_EARTH: f32 = 6372.8;
@@ -251,7 +241,7 @@ fn latlong_triangle_to_sphere(triangle: Triangle<f32, 2>) -> Triangle<f32, 3> {
 }
 
 fn latlong2xyz(longlat: Vector<f32, 2>) -> Vector<f32, 3> {
-    let [long, lat] = longlat.into_array().map(f32::to_radians);
+    let [long, lat] = longlat.into_array();
     // Polar angle. 0 <= φ <= PI = colatitude in geography
     let phi = (PI / 2.0) - lat;
     // Azimuthal angle = longitude. 0 <= θ <= 2*PI
@@ -267,29 +257,31 @@ fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     geojson_str.parse::<GeoJson>().unwrap()
 }
 
-/// Process top-level GeoJSON items
+/// Process top-level GeoJSON items and returns a vector of 2D triangles
+/// with the coordinates in radians
 fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle<f32, 2>> {
     let mut vertices = Vec::new();
     match *gj {
         GeoJson::FeatureCollection(ref ctn) => {
             for feature in &ctn.features {
                 if let Some(ref geom) = feature.geometry {
-                    vertices.extend(match_geometry(geom));
+                    vertices.extend(geometry_to_triangles(geom));
                 }
             }
         }
         GeoJson::Feature(ref feature) => {
             if let Some(ref geom) = feature.geometry {
-                vertices.extend(match_geometry(geom));
+                vertices.extend(geometry_to_triangles(geom));
             }
         }
-        GeoJson::Geometry(ref geometry) => vertices.extend(match_geometry(geometry)),
+        GeoJson::Geometry(ref geometry) => vertices.extend(geometry_to_triangles(geometry)),
     }
     vertices
 }
 
-/// Process GeoJSON geometries
-fn match_geometry(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
+/// Process GeoJSON geometries and returns a vector of 2D triangles with
+/// the coordinates in radians.
+fn geometry_to_triangles(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
     let mut vertices = Vec::new();
     match &geom.value {
         Value::Polygon(p) => {
@@ -307,7 +299,7 @@ fn match_geometry(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
             // GeometryCollections contain other Geometry types, and can nest
             // we deal with this by recursively processing each geometry
             for geometry in gc {
-                vertices.extend(match_geometry(geometry))
+                vertices.extend(geometry_to_triangles(geometry))
             }
         }
         // Point, LineString, and their Multi– counterparts
@@ -316,15 +308,15 @@ fn match_geometry(geom: &Geometry) -> Vec<Triangle<f32, 2>> {
     vertices
 }
 
-/// Takes a 2D polygon, performs earcutr and returns the 2D triangles
+/// Takes a 2D polygon, performs earcutr and returns the 2D triangles with radian coordinates.
 fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle<f32, 2>> {
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
-    // Lower resolution to f32 and use for the rest of the program
+    // Convert coordinates to radians and lower resolution to f32 and use for the rest of the program
     let flat_vertices = flat_vertices
         .into_iter()
-        .map(|f| f as f32)
-        .collect::<Vec<f32>>();
+        .map(|f: f64| f.to_radians() as f32)
+        .collect::<Vec<_>>();
 
     let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
     let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
