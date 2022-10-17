@@ -1,5 +1,6 @@
 #![feature(array_chunks)]
 #![feature(slice_as_chunks)]
+#![feature(array_windows)]
 
 use clap::Parser;
 use std::collections::hash_map::Entry;
@@ -48,35 +49,55 @@ struct Output {
     ///
     /// The `*3` part comes from the fact that the `indices` says which vertice,
     /// to pull from `positions`, and each vertice occupies three elements in `positions`.
-    indices: Vec<u32>,
+    triangle_indices: Vec<u32>,
+    contour_indices: Vec<u32>,
 }
 
 fn main() {
     env_logger::init();
     let args = Args::parse();
 
-    let mesh: Vec<Vertex> = world_vertices(args.geojson, args.subdivide);
+    let (triangles, contours) = world_vertices(args.geojson, args.subdivide);
 
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut output = Output {
         positions: Vec::new(),
-        indices: Vec::new(),
+        triangle_indices: Vec::new(),
+        contour_indices: Vec::new(),
     };
 
-    let num_3d_vertices = mesh.len();
-    let mut next_index: u32 = 0;
-    for vertex in mesh {
+    let num_3d_vertices = triangles.len();
+    for vertex in triangles {
+        let next_index = u32::try_from(seen_vertices.len()).unwrap();
         match seen_vertices.entry(vertex) {
             Entry::Occupied(entry) => {
                 // This vertex is already in `output.positions`,
                 // just push the index
-                output.indices.push(*entry.get());
+                output.triangle_indices.push(*entry.get());
             }
             Entry::Vacant(entry) => {
                 entry.insert(next_index);
-                output.indices.push(next_index);
+                output.triangle_indices.push(next_index);
                 output.positions.extend(vertex.to_vector().into_array());
-                next_index = next_index.checked_add(1).unwrap();
+            }
+        }
+    }
+    for contour in contours {
+        for line_vertices in contour.array_windows::<2>() {
+            for &vertex in line_vertices {
+                let next_index = u32::try_from(seen_vertices.len()).unwrap();
+                match seen_vertices.entry(vertex) {
+                    Entry::Occupied(entry) => {
+                        // This vertex is already in `output.positions`,
+                        // just push the index
+                        output.contour_indices.push(*entry.get());
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(next_index);
+                        output.contour_indices.push(next_index);
+                        output.positions.extend(vertex.to_vector().into_array());
+                    }
+                }
             }
         }
     }
@@ -95,8 +116,11 @@ fn main() {
     }
 }
 
-pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Vertex> {
-    let world_triangles = geo::triangulate_geojson(geojson_path);
+pub fn world_vertices(
+    geojson_path: impl AsRef<Path>,
+    subdivide: bool,
+) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
+    let (world_triangles, world_contours) = geo::triangulate_geojson(geojson_path);
     let num_2d_triangles = world_triangles.len();
     log::info!(
         "Parsed and earcutrd GeoJson has {} triangles",
@@ -104,6 +128,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
     );
 
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
+    let mut world_contours_sphere = Vec::with_capacity(world_contours.len());
     for triangle_2d in world_triangles {
         if subdivide {
             for subdivided_triangle in geo::subdivide_triangle(triangle_2d) {
@@ -112,6 +137,9 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
         } else {
             world_triangles_sphere.push(geo_triangle_to_sphere(triangle_2d));
         }
+    }
+    for contour in world_contours {
+        world_contours_sphere.push(contour.into_iter().map(|c| latlong2xyz(c)).collect());
     }
     log::info!(
         "Mapped {} 2D triangles onto {} 3D triangles on a sphere",
@@ -123,7 +151,7 @@ pub fn world_vertices(geojson_path: impl AsRef<Path>, subdivide: bool) -> Vec<Ve
         vertices.extend(triangle_3d.to_vertices().map(Vertex::from));
     }
     log::info!("Converted triangles into {} vertices", vertices.len());
-    vertices
+    (vertices, world_contours_sphere)
 }
 
 /// Maps a 2D geo triangle with latitude and longitude coordinates in radians onto

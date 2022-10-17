@@ -1,4 +1,4 @@
-use geojson::{GeoJson, Geometry, Value};
+use geojson::{GeoJson, Geometry, PolygonType, Value};
 use std::fs;
 use std::path::Path;
 
@@ -28,7 +28,7 @@ impl From<[Coordinate; 3]> for Triangle {
 
 /// Reads GeoJSON from a file, triangulates the mesh with the earcut algorithm
 /// and returns a vector of 2D triangles with coordinates in radians
-pub fn triangulate_geojson(path: impl AsRef<Path>) -> Vec<Triangle> {
+pub fn triangulate_geojson(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>>) {
     let geojson = parse_geojson(path);
     geojson_to_triangles(&geojson)
 }
@@ -90,24 +90,30 @@ fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
 
 /// Process top-level GeoJSON items and returns a vector of 2D triangles
 /// with the coordinates in radians
-fn geojson_to_triangles(gj: &GeoJson) -> Vec<Triangle> {
+fn geojson_to_triangles(gj: &GeoJson) -> (Vec<Triangle>, Vec<Vec<Coordinate>>) {
     let mut vertices = Vec::new();
+    let mut contours = Vec::new();
     match *gj {
         GeoJson::FeatureCollection(ref ctn) => {
             for feature in &ctn.features {
-                if let Some(ref geom) = feature.geometry {
-                    vertices.extend(geometry_to_triangles(geom));
+                if let Some(geometry) = &feature.geometry {
+                    vertices.extend(geometry_to_triangles(&geometry));
+                    contours.extend(geometry_to_country_contours(&geometry));
                 }
             }
         }
         GeoJson::Feature(ref feature) => {
-            if let Some(ref geom) = feature.geometry {
-                vertices.extend(geometry_to_triangles(geom));
+            if let Some(geometry) = &feature.geometry {
+                vertices.extend(geometry_to_triangles(geometry));
+                contours.extend(geometry_to_country_contours(&geometry));
             }
         }
-        GeoJson::Geometry(ref geometry) => vertices.extend(geometry_to_triangles(geometry)),
+        GeoJson::Geometry(ref geometry) => {
+            vertices.extend(geometry_to_triangles(geometry));
+            contours.extend(geometry_to_country_contours(&geometry));
+        },
     }
-    vertices
+    (vertices, contours)
 }
 
 /// Process GeoJSON geometries and returns a vector of 2D triangles with
@@ -168,6 +174,44 @@ fn process_polygon_with_holes(polygon: &geojson::PolygonType) -> Vec<Triangle> {
         output.push(triangle);
     }
     output
+}
+
+fn geometry_to_country_contours(geom: &Geometry) -> Vec<Vec<Coordinate>> {
+    let mut contours = Vec::new();
+    match &geom.value {
+        Value::Polygon(polygon) => {
+            log::debug!("Matched a Polygon");
+            contours.extend(polygon_to_contours(polygon));
+        }
+        Value::MultiPolygon(polygons) => {
+            log::debug!("Matched a MultiPolygon");
+            for polygon in polygons {
+                contours.extend(polygon_to_contours(polygon));
+            }
+        }
+        Value::GeometryCollection(ref _gc) => {
+            unimplemented!("Matched a GeometryCollection");
+        }
+        // Point, LineString, and their Multi– counterparts
+        _ => unimplemented!("Matched some other geometry"),
+    }
+    contours
+}
+
+fn polygon_to_contours(polygon: &PolygonType) -> Vec<Vec<Coordinate>> {
+    let mut contours = Vec::with_capacity(polygon.len());
+    for ring in polygon {
+        let mut contour = Vec::with_capacity(ring.len());
+        for coordinate in ring {
+            let [long, lat] = <[f64; 2]>::try_from(coordinate.as_slice()).unwrap();
+            contour.push(Coordinate {
+                lat: lat.to_radians() as f32,
+                long: long.to_radians() as f32,
+            });
+        }
+        contours.push(contour)
+    }
+    contours
 }
 
 /// Implemented as per https://en.wikipedia.org/wiki/Haversine_formula
