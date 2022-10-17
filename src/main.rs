@@ -2,10 +2,15 @@
 #![feature(slice_as_chunks)]
 #![feature(array_windows)]
 
+//! https://public.opendatasoft.com/explore/dataset/natural-earth-countries-1_110m/table/
+//! https://vvvv.org/blog/polar-spherical-and-geographic-coordinates
+//! https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Creating_3D_objects_using_WebGL
+
 use clap::Parser;
+use geo::Coordinate;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::f32::consts::PI;
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::path::{Path, PathBuf};
 
 mod geo;
@@ -28,6 +33,10 @@ struct Args {
     /// to not take a too noticeable shortcut through the sphere.
     #[arg(long)]
     subdivide: bool,
+
+    /// If true, outputs a sphere (to use for ocean) instead of the geo data
+    #[arg(long)]
+    ocean: bool,
 }
 
 /// The structur this program outputs (in JSON format).
@@ -53,9 +62,46 @@ struct Output {
     contour_indices: Vec<u32>,
 }
 
+#[derive(Debug, serde::Serialize)]
+struct SphereOutput {
+    positions: Vec<f32>,
+    indices: Vec<u32>,
+}
+
 fn main() {
     env_logger::init();
     let args = Args::parse();
+
+    if args.ocean {
+        let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
+        let mut output = SphereOutput {
+            positions: Vec::new(),
+            indices: Vec::new(),
+        };
+        for vertex in icosahedron_vertices(4) {
+            let next_index = u32::try_from(seen_vertices.len()).unwrap();
+            match seen_vertices.entry(vertex) {
+                Entry::Occupied(entry) => {
+                    // This vertex is already in `output.positions`,
+                    // just push the index
+                    output.indices.push(*entry.get());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(next_index);
+                    output.indices.push(next_index);
+                    output.positions.extend(vertex.to_vector().into_array());
+                }
+            }
+        }
+        log::info!("Outputting {}/{} vertices", seen_vertices.len(), output.indices.len());
+        let stdout = std::io::stdout().lock();
+        if args.pretty {
+            serde_json::to_writer_pretty(stdout, &output).unwrap();
+        } else {
+            serde_json::to_writer(stdout, &output).unwrap();
+        }
+        return;
+    }
 
     let (triangles, contours) = world_vertices(args.geojson, args.subdivide);
 
@@ -171,4 +217,73 @@ fn latlong2xyz(c: geo::Coordinate) -> Vertex {
     let z = phi.sin() * theta.sin();
     let y = phi.cos();
     Vertex::from(Vector::from_array([x, y, z]))
+}
+
+pub fn icosahedron_vertices(subdivide_times: u8) -> Vec<Vertex> {
+    let mut triangles = icosahedron_faces();
+    for _ in 0..subdivide_times {
+        let old_triangles = core::mem::replace(&mut triangles, Vec::new());
+        for triangle in old_triangles {
+            triangles.extend(&subdivide_sphere_face(triangle));
+        }
+    }
+
+    let mut vertices = Vec::with_capacity(triangles.len() * 3);
+    for triangle in triangles {
+        vertices.extend(triangle.to_vertices());
+    }
+    vertices
+}
+
+fn icosahedron_faces() -> Vec<Triangle> {
+    let latlong2xyz = |lat: f32, long: f32| latlong2xyz(Coordinate { lat, long });
+
+    let mut triangles = Vec::with_capacity(20);
+
+    let upper_ring_lat = 0.5f32.atan();
+    let lower_ring_lat = -upper_ring_lat;
+    for i in 0..5 {
+        let upper_long1 = i as f32 / 5.0 * TAU;
+        let upper_long2 = (i + 1) as f32 / 5.0 * TAU;
+        let lower_long1 = (i as f32 + 0.5) / 5.0 * TAU;
+        let lower_long2 = (i as f32 + 1.5) / 5.0 * TAU;
+        let top_triangle = Triangle::from([
+            latlong2xyz(FRAC_PI_2, 0.),
+            latlong2xyz(upper_ring_lat, upper_long1),
+            latlong2xyz(upper_ring_lat, upper_long2),
+        ]);
+        let middle_triangle1 = Triangle::from([
+            latlong2xyz(upper_ring_lat, upper_long1),
+            latlong2xyz(lower_ring_lat, lower_long1),
+            latlong2xyz(upper_ring_lat, upper_long2),
+        ]);
+        let middle_triangle2 = Triangle::from([
+            latlong2xyz(upper_ring_lat, upper_long2),
+            latlong2xyz(lower_ring_lat, lower_long1),
+            latlong2xyz(lower_ring_lat, lower_long2),
+        ]);
+        let bottom_triangle = Triangle::from([
+            latlong2xyz(lower_ring_lat, lower_long1),
+            latlong2xyz(-FRAC_PI_2, 0.),
+            latlong2xyz(lower_ring_lat, lower_long2),
+        ]);
+        triangles.push(top_triangle);
+        triangles.push(middle_triangle1);
+        triangles.push(middle_triangle2);
+        triangles.push(bottom_triangle);
+    }
+    triangles
+}
+
+fn subdivide_sphere_face(triangle: Triangle) -> [Triangle; 4] {
+    let [v0, v1, v2] = triangle.to_vertices().map(|v| v.to_vector());
+    let v3 = Vertex::from((0.5 * (v0 + v1)).normalize());
+    let v4 = Vertex::from((0.5 * (v1 + v2)).normalize());
+    let v5 = Vertex::from((0.5 * (v2 + v0)).normalize());
+    [
+        Triangle::from([v0.into(), v3, v5]),
+        Triangle::from([v3, v1.into(), v4]),
+        Triangle::from([v4, v2.into(), v5]),
+        Triangle::from([v3, v4, v5]),
+    ]
 }

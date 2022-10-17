@@ -111,7 +111,7 @@ fn geojson_to_triangles(gj: &GeoJson) -> (Vec<Triangle>, Vec<Vec<Coordinate>>) {
         GeoJson::Geometry(ref geometry) => {
             vertices.extend(geometry_to_triangles(geometry));
             contours.extend(geometry_to_country_contours(&geometry));
-        },
+        }
     }
     (vertices, contours)
 }
