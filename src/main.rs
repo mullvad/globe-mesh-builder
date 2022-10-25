@@ -93,7 +93,11 @@ fn main() {
                 }
             }
         }
-        log::info!("Outputting {}/{} vertices", seen_vertices.len(), output.indices.len());
+        log::info!(
+            "Outputting {}/{} vertices",
+            seen_vertices.len(),
+            output.indices.len()
+        );
         let stdout = std::io::stdout().lock();
         if args.pretty {
             serde_json::to_writer_pretty(stdout, &output).unwrap();
