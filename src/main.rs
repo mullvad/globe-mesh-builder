@@ -215,11 +215,12 @@ fn geo_triangle_to_sphere(triangle: geo::Triangle) -> Triangle {
 fn latlong2xyz(c: geo::Coordinate) -> Vertex {
     // Polar angle. 0 <= φ <= PI = colatitude in geography
     let phi = (PI / 2.0) - c.lat;
-    // Azimuthal angle = longitude. 0 <= θ <= 2*PI
-    let theta = c.long + PI;
-    let x = -(phi.sin() * theta.cos());
-    let z = phi.sin() * theta.sin();
+    // Azimuthal angle = longitude. -PI <= θ <= PI
+    let theta = c.long;
+
+    let x = phi.sin() * theta.sin();
     let y = phi.cos();
+    let z = phi.sin() * theta.cos();
     Vertex::from(Vector::from_array([x, y, z]))
 }
 
@@ -290,4 +291,34 @@ fn subdivide_sphere_face(triangle: Triangle) -> [Triangle; 4] {
         Triangle::from([v4, v2.into(), v5]),
         Triangle::from([v3, v4, v5]),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn latlong2xyz_sanity() {
+        let north_pole1 = geo::Coordinate { lat: PI/2.0, long: 0.0 };
+        let north_pole2 = geo::Coordinate { lat: PI/2.0, long: PI/1.2 };
+        assert_eq!(latlong2xyz(north_pole1), Vertex::from([0.0, 1.0, 0.0]));
+        assert_eq!(latlong2xyz(north_pole2), Vertex::from([0.0, 1.0, 0.0]));
+
+        let south_pole1 = geo::Coordinate { lat: -PI/2.0, long: 0.0 };
+        let south_pole2 = geo::Coordinate { lat: -PI/2.0, long: 0.1234 };
+        assert_eq!(latlong2xyz(south_pole1), Vertex::from([0.0, -1.0, 0.0]));
+        assert_eq!(latlong2xyz(south_pole2), Vertex::from([0.0, -1.0, 0.0]));
+
+        let zero = geo::Coordinate { lat: 0.0, long: 0.0 };
+        assert_eq!(latlong2xyz(zero), Vertex::from([0.0, 0.0, 1.0]));
+
+        let backside_equator = geo::Coordinate { lat: 0.0, long: PI };
+        assert_eq!(latlong2xyz(backside_equator), Vertex::from([0.0, 0.0, -1.0]));
+
+        let to_the_right = geo::Coordinate { lat: 0.0, long: PI/2.0 };
+        assert_eq!(latlong2xyz(to_the_right), Vertex::from([1.0, 0.0, 0.0]));
+
+        let to_the_left = geo::Coordinate { lat: 0.0, long: -PI/2.0 };
+        assert_eq!(latlong2xyz(to_the_left), Vertex::from([-1.0, 0.0, 0.0]));
+    }
 }

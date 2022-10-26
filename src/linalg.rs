@@ -12,6 +12,12 @@ impl Vertex {
     }
 }
 
+impl From<[f32; 3]> for Vertex {
+    fn from(array: [f32; 3]) -> Self {
+        Self::from(Vector::from(array))
+    }
+}
+
 impl From<Vector<f32, 3>> for Vertex {
     fn from(vector: Vector<f32, 3>) -> Self {
         Vertex(vector)
