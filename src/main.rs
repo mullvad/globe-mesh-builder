@@ -5,6 +5,9 @@
 //! https://public.opendatasoft.com/explore/dataset/natural-earth-countries-1_110m/table/
 //! https://vvvv.org/blog/polar-spherical-and-geographic-coordinates
 //! https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/Tutorial/Creating_3D_objects_using_WebGL
+//! https://www.tutorialspoint.com/webgl/webgl_interactive_cube.htm
+//! https://geojson-maps.ash.ms/ <- GeoJSON source data
+//! https://greggman.github.io/webgl-lint/ <- Great debugging for webgl
 
 use clap::Parser;
 use geo::Coordinate;
