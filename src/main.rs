@@ -302,26 +302,50 @@ mod tests {
 
     #[test]
     fn latlong2xyz_sanity() {
-        let north_pole1 = geo::Coordinate { lat: PI/2.0, long: 0.0 };
-        let north_pole2 = geo::Coordinate { lat: PI/2.0, long: PI/1.2 };
+        let north_pole1 = geo::Coordinate {
+            lat: PI / 2.0,
+            long: 0.0,
+        };
+        let north_pole2 = geo::Coordinate {
+            lat: PI / 2.0,
+            long: PI / 1.2,
+        };
         assert_eq!(latlong2xyz(north_pole1), Vertex::from([0.0, 1.0, 0.0]));
         assert_eq!(latlong2xyz(north_pole2), Vertex::from([0.0, 1.0, 0.0]));
 
-        let south_pole1 = geo::Coordinate { lat: -PI/2.0, long: 0.0 };
-        let south_pole2 = geo::Coordinate { lat: -PI/2.0, long: 0.1234 };
+        let south_pole1 = geo::Coordinate {
+            lat: -PI / 2.0,
+            long: 0.0,
+        };
+        let south_pole2 = geo::Coordinate {
+            lat: -PI / 2.0,
+            long: 0.1234,
+        };
         assert_eq!(latlong2xyz(south_pole1), Vertex::from([0.0, -1.0, 0.0]));
         assert_eq!(latlong2xyz(south_pole2), Vertex::from([0.0, -1.0, 0.0]));
 
-        let zero = geo::Coordinate { lat: 0.0, long: 0.0 };
+        let zero = geo::Coordinate {
+            lat: 0.0,
+            long: 0.0,
+        };
         assert_eq!(latlong2xyz(zero), Vertex::from([0.0, 0.0, 1.0]));
 
         let backside_equator = geo::Coordinate { lat: 0.0, long: PI };
-        assert_eq!(latlong2xyz(backside_equator), Vertex::from([0.0, 0.0, -1.0]));
+        assert_eq!(
+            latlong2xyz(backside_equator),
+            Vertex::from([0.0, 0.0, -1.0])
+        );
 
-        let to_the_right = geo::Coordinate { lat: 0.0, long: PI/2.0 };
+        let to_the_right = geo::Coordinate {
+            lat: 0.0,
+            long: PI / 2.0,
+        };
         assert_eq!(latlong2xyz(to_the_right), Vertex::from([1.0, 0.0, 0.0]));
 
-        let to_the_left = geo::Coordinate { lat: 0.0, long: -PI/2.0 };
+        let to_the_left = geo::Coordinate {
+            lat: 0.0,
+            long: -PI / 2.0,
+        };
         assert_eq!(latlong2xyz(to_the_left), Vertex::from([-1.0, 0.0, 0.0]));
     }
 }
