@@ -81,7 +81,7 @@ fn main() {
             positions: Vec::new(),
             indices: Vec::new(),
         };
-        for vertex in icosahedron_vertices(4) {
+        for vertex in icosahedron_vertices(4, 0.999) {
             let next_index = u32::try_from(seen_vertices.len()).unwrap();
             match seen_vertices.entry(vertex) {
                 Entry::Occupied(entry) => {
@@ -227,7 +227,7 @@ fn latlong2xyz(c: geo::Coordinate) -> Vertex {
     Vertex::from(Vector::from_array([x, y, z]))
 }
 
-pub fn icosahedron_vertices(subdivide_times: u8) -> Vec<Vertex> {
+pub fn icosahedron_vertices(subdivide_times: u8, scale: f32) -> Vec<Vertex> {
     let mut triangles = icosahedron_faces();
     for _ in 0..subdivide_times {
         let old_triangles = core::mem::replace(&mut triangles, Vec::new());
@@ -238,7 +238,7 @@ pub fn icosahedron_vertices(subdivide_times: u8) -> Vec<Vertex> {
 
     let mut vertices = Vec::with_capacity(triangles.len() * 3);
     for triangle in triangles {
-        vertices.extend(triangle.to_vertices());
+        vertices.extend(triangle.to_vertices().map(|v| v * scale));
     }
     vertices
 }

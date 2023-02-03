@@ -1,4 +1,5 @@
 use std::hash::Hash;
+use std::ops::Mul;
 use total_float_wrap::TotalF32;
 pub use vecmat::Vector;
 
@@ -21,6 +22,14 @@ impl From<[f32; 3]> for Vertex {
 impl From<Vector<f32, 3>> for Vertex {
     fn from(vector: Vector<f32, 3>) -> Self {
         Vertex(vector)
+    }
+}
+
+impl Mul<f32> for Vertex {
+    type Output = Self;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        Vertex(self.0 * rhs)
     }
 }
 
