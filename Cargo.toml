@@ -16,3 +16,4 @@ log = "0.4.17"
 clap = { version = "4.0.13", features = ["derive"] }
 env_logger = "0.9.1"
 total_float_wrap = "0.1.1"
+shapefile = { version = "0.3.0", features = ["geo-types"] }

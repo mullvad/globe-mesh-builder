@@ -12,9 +12,11 @@
 use clap::Parser;
 use geo::Coordinate;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::thread;
 
 mod geo;
 mod linalg;
@@ -74,7 +76,15 @@ struct SphereOutput {
 fn main() {
     env_logger::init();
     let args = Args::parse();
+    thread::Builder::new()
+        .stack_size(1024 * 100)
+        .spawn(|| run(args))
+        .unwrap()
+        .join()
+        .unwrap();
+}
 
+fn run(args: Args) {
     if args.ocean {
         let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
         let mut output = SphereOutput {
@@ -101,7 +111,8 @@ fn main() {
             seen_vertices.len(),
             output.indices.len()
         );
-        let stdout = std::io::stdout().lock();
+        let mut stdout = std::io::stdout().lock();
+        write!(stdout, "const oceanData = ").unwrap();
         if args.pretty {
             serde_json::to_writer_pretty(stdout, &output).unwrap();
         } else {
@@ -161,7 +172,8 @@ fn main() {
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
 
-    let stdout = std::io::stdout().lock();
+    let mut stdout = std::io::stdout().lock();
+    write!(stdout, "const globeData = ").unwrap();
     if args.pretty {
         serde_json::to_writer_pretty(stdout, &output).unwrap();
     } else {
@@ -173,20 +185,24 @@ pub fn world_vertices(
     geojson_path: impl AsRef<Path>,
     subdivide: bool,
 ) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
-    let (world_triangles, world_contours) = geo::triangulate_geojson(geojson_path);
+    let (world_triangles, world_contours) = geo::read_world(geojson_path);
+    // let (world_triangles, world_contours) = geo::triangulate_geojson(geojson_path);
     let num_2d_triangles = world_triangles.len();
     log::info!(
         "Parsed and earcutrd GeoJson has {} triangles",
         num_2d_triangles
     );
+    log::debug!("Number of world contours: {}", world_contours.len());
 
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
     let mut world_contours_sphere = Vec::with_capacity(world_contours.len());
     for triangle_2d in world_triangles {
         if subdivide {
-            for subdivided_triangle in geo::subdivide_triangle(triangle_2d) {
+            log::debug!("LOLOLOL Subdividing {:?}", triangle_2d);
+            for subdivided_triangle in geo::subdivide_triangle(triangle_2d, &mut HashSet::new()) {
                 world_triangles_sphere.push(geo_triangle_to_sphere(subdivided_triangle));
             }
+            log::debug!("");
         } else {
             world_triangles_sphere.push(geo_triangle_to_sphere(triangle_2d));
         }
@@ -298,7 +314,20 @@ fn subdivide_sphere_face(triangle: Triangle) -> [Triangle; 4] {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
+    
+    #[test]
+    fn subdivide_broken_triangle() {
+        let broken_triangle = geo::Triangle::from([
+            geo::Coordinate { lat: -1.4722126, long: 3.1415927 },
+            geo::Coordinate { lat: -1.439808, long: -0.7991614 },
+            geo::Coordinate { lat: -1.4566238, long: -1.0387504 }
+        ]);
+
+        geo::subdivide_triangle(broken_triangle, &mut HashSet::new());
+    }
 
     #[test]
     fn latlong2xyz_sanity() {
@@ -349,3 +378,4 @@ mod tests {
         assert_eq!(latlong2xyz(to_the_left), Vertex::from([-1.0, 0.0, 0.0]));
     }
 }
+

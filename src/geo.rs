@@ -1,6 +1,14 @@
 use geojson::{GeoJson, Geometry, PolygonType, Value};
-use std::fs;
+use shapefile::{Shape, PolygonRing, Point};
+use total_float_wrap::TotalF32;
+use std::collections::HashSet;
+use std::f32::consts::PI;
+use std::hash::Hash;
+use std::time::Duration;
+use std::{fs, thread};
 use std::path::Path;
+
+use crate::linalg::Vertex;
 
 const MAX_EDGE_LENGTH_KM: f32 = 250.0;
 
@@ -10,8 +18,25 @@ pub struct Coordinate {
     pub long: f32,
 }
 
+impl PartialEq for Coordinate {
+    fn eq(&self, other: &Self) -> bool {
+        let lat_diff = self.lat - other.lat;
+        let long_diff = self.long - other.long;
+        lat_diff <= f32::EPSILON && self.long <= f32::EPSILON
+    }
+}
+
+impl Eq for Coordinate {}
+
+impl Hash for Coordinate {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        TotalF32(self.lat).hash(state);
+        TotalF32(self.long).hash(state);
+    }
+}
+
 /// An 2D triangle with geo coordinates as radians
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Triangle([Coordinate; 3]);
 
 impl Triangle {
@@ -35,14 +60,30 @@ pub fn triangulate_geojson(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Co
 
 /// Takes a geo triangle as input, finds the longest side of it and if that is longer
 /// than MAX_EDGE_LENGTH_KM in haversine distance, cut it into two, and recurse.
-pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
+pub fn subdivide_triangle(triangle: Triangle, seen_triangles: &mut HashSet<Triangle>) -> Vec<Triangle> {
+    if !seen_triangles.insert(triangle) {
+        // panic!("We have already seen {triangle:?}");
+    }
+    log::debug!("Subdividing {:?}", triangle);
     let [c0, c1, c2] = triangle.to_coordinates();
     let d01 = haversine_distance(c0, c1);
     let d12 = haversine_distance(c1, c2);
     let d20 = haversine_distance(c2, c0);
 
-    if d01 <= MAX_EDGE_LENGTH_KM && d12 <= MAX_EDGE_LENGTH_KM && d20 <= MAX_EDGE_LENGTH_KM {
-        // No side is too long. Base case, no triangle splitting will happen
+    let mut too_long_side = false;
+    if d01 > MAX_EDGE_LENGTH_KM {
+        too_long_side = true;
+        eprintln!("c0-c1 is too long: {d01}");
+    }
+    if d12 > MAX_EDGE_LENGTH_KM {
+        too_long_side = true;
+        eprintln!("c1-c2 is too long: {d12}");
+    }
+    if d20 > MAX_EDGE_LENGTH_KM {
+        too_long_side = true;
+        eprintln!("c2-c0 is too long: {d20}");
+    }
+    if !too_long_side {
         return vec![triangle];
     }
 
@@ -65,8 +106,9 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
     let mut output = Vec::with_capacity(2);
 
     let [new_triangle1, new_triangle2] = split_triangle(rotated_triangle);
-    output.extend(subdivide_triangle(new_triangle1));
-    output.extend(subdivide_triangle(new_triangle2));
+    // thread::sleep(Duration::from_millis(1000));
+    output.extend(subdivide_triangle(new_triangle1, seen_triangles));
+    output.extend(subdivide_triangle(new_triangle2, seen_triangles));
     output
 }
 
@@ -74,8 +116,8 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
 fn split_triangle(triangle: Triangle) -> [Triangle; 2] {
     let [c0, c1, c2] = triangle.to_coordinates();
     let c1c2_midpoint = Coordinate {
-        lat: (c1.lat + c2.lat) / 2.0,
-        long: (c1.long + c2.long) / 2.0,
+        lat: ((c1.lat + c2.lat) / 2.0).clamp(-PI/2.0, PI/2.0),
+        long: ((c1.long + c2.long) / 2.0).clamp(-PI, PI),
     };
     [
         Triangle::from([c0, c1, c1c2_midpoint]),
@@ -86,6 +128,48 @@ fn split_triangle(triangle: Triangle) -> [Triangle; 2] {
 fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     let geojson_str = fs::read_to_string(path).unwrap();
     geojson_str.parse::<GeoJson>().unwrap()
+}
+
+pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>>) {
+    let mut reader = shapefile::Reader::from_path(path).unwrap();
+
+    let mut vertices = Vec::new();
+    let mut contours = Vec::new();
+
+    for result in reader.iter_shapes_and_records() {
+        let (shape, _record) = result.unwrap();
+        // println!("Shape: {}, records:", shape);
+        // for (name, value) in record {
+        //     println ! ("\t{}: {:?}, ", name, value);
+        // }
+
+        fn points_to_ring(points: &Vec<Point>) -> Vec<Vec<f64>> {
+            points.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>()
+        }
+
+        match shape {
+            Shape::Polygon(polygon) => {
+                let mut rings = Vec::new();
+                for ring in polygon.rings() {
+                    match ring {
+                        PolygonRing::Outer(points) => if rings.is_empty() {
+                            rings.push(points_to_ring(points));
+                        } else {
+                            let triangles = process_polygon_with_holes(&rings);
+                            vertices.extend(triangles);
+                            rings.clear();
+                            rings.push(points_to_ring(points));
+                        },
+                        PolygonRing::Inner(points) => {
+                            rings.push(points_to_ring(points));
+                        }
+                    }
+                }
+            },
+            _ => unimplemented!(),
+        }
+    }
+    (vertices, contours)
 }
 
 /// Process top-level GeoJSON items and returns a vector of 2D triangles
