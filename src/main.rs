@@ -23,6 +23,8 @@ mod linalg;
 
 use linalg::{Triangle, Vector, Vertex};
 
+pub const MIN_2D_POLAR_COORDINATE_ERROR: f32 = f32::EPSILON * 2.0;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -197,6 +199,7 @@ pub fn world_vertices(
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
     let mut world_contours_sphere = Vec::with_capacity(world_contours.len());
     for triangle_2d in world_triangles {
+        let triange_2d = geo::clean_triangle_coordinates(triangle_2d);
         if subdivide {
             log::debug!("LOLOLOL Subdividing {:?}", triangle_2d);
             for subdivided_triangle in geo::subdivide_triangle(triangle_2d, &mut HashSet::new()) {
@@ -317,16 +320,49 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
-    
+
     #[test]
     fn subdivide_broken_triangle() {
-        let broken_triangle = geo::Triangle::from([
-            geo::Coordinate { lat: -1.4722126, long: 3.1415927 },
-            geo::Coordinate { lat: -1.439808, long: -0.7991614 },
-            geo::Coordinate { lat: -1.4566238, long: -1.0387504 }
-        ]);
+        // let broken_triangle = geo::Triangle::from([
+        //     geo::Coordinate {
+        //         lat: -1.4722126,
+        //         long: 3.1415927,
+        //     },
+        //     geo::Coordinate {
+        //         lat: -1.439808,
+        //         long: -0.7991614,
+        //     },
+        //     geo::Coordinate {
+        //         lat: -1.4566238,
+        //         long: -1.0387504,
+        //     },
+        // ]);
 
+        let broken_triangle = geo::Triangle::from([
+            Coordinate {
+                lat: 1.2223023,
+                long: -2.5530975,
+            },
+            Coordinate {
+                lat: 1.2225933,
+                long: -2.5593796,
+            },
+            Coordinate {
+                lat: 1.2190795,
+                long: -2.513102,
+            },
+        ]);
         geo::subdivide_triangle(broken_triangle, &mut HashSet::new());
+    }
+
+    #[test]
+    fn rem_euclid() {
+        dbg!((-PI) % TAU);
+        dbg!(((-PI) - 1.0) % TAU);
+        dbg!((PI) % (TAU));
+        dbg!((PI + 1.0) % TAU);
+        dbg!((-1.0f32) % TAU);
+        dbg!((1.0f32) % TAU);
     }
 
     #[test]
@@ -378,4 +414,3 @@ mod tests {
         assert_eq!(latlong2xyz(to_the_left), Vertex::from([-1.0, 0.0, 0.0]));
     }
 }
-

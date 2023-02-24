@@ -1,16 +1,14 @@
 use geojson::{GeoJson, Geometry, PolygonType, Value};
-use shapefile::{Shape, PolygonRing, Point};
-use total_float_wrap::TotalF32;
+use shapefile::{Point, PolygonRing, Shape};
 use std::collections::HashSet;
-use std::f32::consts::PI;
+use std::f32::consts::{PI, TAU};
 use std::hash::Hash;
-use std::time::Duration;
-use std::{fs, thread};
 use std::path::Path;
+use std::fs;
+use total_float_wrap::TotalF32;
 
-use crate::linalg::Vertex;
-
-const MAX_EDGE_LENGTH_KM: f32 = 250.0;
+const MAX_COORDINATE_ANGLE_RAD: f32 = (5.0 / 180.0) * PI;
+use crate::MIN_2D_POLAR_COORDINATE_ERROR;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Coordinate {
@@ -18,11 +16,13 @@ pub struct Coordinate {
     pub long: f32,
 }
 
+fn f32_round(f: f32) -> i64 {
+    (f * 10_000.0).round() as i64
+}
+
 impl PartialEq for Coordinate {
     fn eq(&self, other: &Self) -> bool {
-        let lat_diff = self.lat - other.lat;
-        let long_diff = self.long - other.long;
-        lat_diff <= f32::EPSILON && self.long <= f32::EPSILON
+        f32_round(self.lat) == f32_round(other.lat) && f32_round(self.long) == f32_round(other.long)
     }
 }
 
@@ -30,10 +30,22 @@ impl Eq for Coordinate {}
 
 impl Hash for Coordinate {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        TotalF32(self.lat).hash(state);
-        TotalF32(self.long).hash(state);
+        f32_round(self.lat).hash(state);
+        f32_round(self.long).hash(state);
     }
 }
+
+// #[cfg(test)]
+// mod coordinate_tests {
+//     use super::Coordinate;
+
+//     #[test]
+//     fn almost_same_coordinate_is_same() {
+//         let c0 = Coordinate {
+//             lat
+//         }
+//     }
+// }
 
 /// An 2D triangle with geo coordinates as radians
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -58,28 +70,53 @@ pub fn triangulate_geojson(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Co
     geojson_to_triangles(&geojson)
 }
 
-/// Takes a geo triangle as input, finds the longest side of it and if that is longer
-/// than MAX_EDGE_LENGTH_KM in haversine distance, cut it into two, and recurse.
-pub fn subdivide_triangle(triangle: Triangle, seen_triangles: &mut HashSet<Triangle>) -> Vec<Triangle> {
-    if !seen_triangles.insert(triangle) {
-        // panic!("We have already seen {triangle:?}");
-    }
+/// Takes a geo triangle as input, looks at the lat and long angles between the coordinates
+/// and cuts all edges in half that has one angle larger than MAX_COORDINATE_ANGLE_RAD
+/// and recurse until no angle is too large.
+pub fn subdivide_triangle(
+    triangle: Triangle,
+    seen_triangles: &mut HashSet<Triangle>,
+) -> Vec<Triangle> {
     log::debug!("Subdividing {:?}", triangle);
     let [c0, c1, c2] = triangle.to_coordinates();
-    let d01 = haversine_distance(c0, c1);
-    let d12 = haversine_distance(c1, c2);
-    let d20 = haversine_distance(c2, c0);
+    if (c0 == c1 || c1 == c2 || c2 == c0) {
+        log::debug!("Triangle with zero area!");
+        return vec![triangle];
+    }
+    // assert_ne!(c0, c1);
+    // assert_ne!(c0, c2);
+    // assert_ne!(c1, c2);
+
+    if !seen_triangles.insert(triangle) {
+        panic!("We have already seen {triangle:?}");
+    }
+
+    fn largest_angle(c0: Coordinate, c1: Coordinate) -> f32 {
+        let d_lat = (c1.lat - c0.lat).abs();
+
+        let mut d_long = c1.long - c0.long;
+        if d_long > PI {
+            d_long -= TAU;
+        } else if d_long < -PI {
+            d_long += TAU;
+        }
+
+        d_lat.max(d_long.abs())
+    }
+    let d01 = dbg!(largest_angle(c0, c1));
+    let d12 = dbg!(largest_angle(c1, c2));
+    let d20 = dbg!(largest_angle(c2, c0));
 
     let mut too_long_side = false;
-    if d01 > MAX_EDGE_LENGTH_KM {
+    if d01 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
         eprintln!("c0-c1 is too long: {d01}");
     }
-    if d12 > MAX_EDGE_LENGTH_KM {
+    if d12 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
         eprintln!("c1-c2 is too long: {d12}");
     }
-    if d20 > MAX_EDGE_LENGTH_KM {
+    if d20 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
         eprintln!("c2-c0 is too long: {d20}");
     }
@@ -92,7 +129,7 @@ pub fn subdivide_triangle(triangle: Triangle, seen_triangles: &mut HashSet<Trian
     let rotated_triangle = if d01 >= d12 && d01 >= d20 {
         // The side between c0 and c1 is the longest
         Triangle::from([c2, c0, c1])
-    } else if d12 >= d20 && d12 > d01 {
+    } else if d12 >= d20 && d12 >= d01 {
         // The side between c1 and c2 is the longest
         Triangle::from([c0, c1, c2])
     } else if d20 >= d01 && d20 >= d12 {
@@ -106,7 +143,6 @@ pub fn subdivide_triangle(triangle: Triangle, seen_triangles: &mut HashSet<Trian
     let mut output = Vec::with_capacity(2);
 
     let [new_triangle1, new_triangle2] = split_triangle(rotated_triangle);
-    // thread::sleep(Duration::from_millis(1000));
     output.extend(subdivide_triangle(new_triangle1, seen_triangles));
     output.extend(subdivide_triangle(new_triangle2, seen_triangles));
     output
@@ -115,15 +151,137 @@ pub fn subdivide_triangle(triangle: Triangle, seen_triangles: &mut HashSet<Trian
 /// Splits a triangle into two. The edge that is cut into two is the one between c1 and c2.
 fn split_triangle(triangle: Triangle) -> [Triangle; 2] {
     let [c0, c1, c2] = triangle.to_coordinates();
-    let c1c2_midpoint = Coordinate {
-        lat: ((c1.lat + c2.lat) / 2.0).clamp(-PI/2.0, PI/2.0),
-        long: ((c1.long + c2.long) / 2.0).clamp(-PI, PI),
-    };
+    let c1c2_midpoint = midpoint(c1, c2);
     [
         Triangle::from([c0, c1, c1c2_midpoint]),
         Triangle::from([c0, c1c2_midpoint, c2]),
     ]
 }
+
+fn midpoint(mut c0: Coordinate, mut c1: Coordinate) -> Coordinate {
+    assert_ne!(c0, c1);
+    let mut d_long = c1.long - c0.long;
+    if d_long > PI {
+        d_long -= TAU;
+    } else if d_long < -PI {
+        d_long += TAU;
+    }
+    let mut output = Coordinate {
+        lat: (c0.lat + c1.lat) / 2.0,
+        long: c0.long + (d_long / 2.0),
+    };
+    clean_coordinate(&mut output);
+    assert_ne!(output, c0);
+    assert_ne!(output, c1);
+    output
+}
+
+pub fn clean_triangle_coordinates(triangle: Triangle) -> Triangle {
+    let [mut c0, mut c1, mut c2] = triangle.to_coordinates();
+    clean_coordinate(&mut c0);
+    clean_coordinate(&mut c1);
+    clean_coordinate(&mut c2);
+    Triangle::from([c0, c1, c2])
+}
+
+fn clean_coordinate(c: &mut Coordinate) {
+    if c.long <= -PI {
+        c.long += TAU;
+    } else if c.long > PI {
+        c.long -= TAU;
+    }
+    assert!(c.long > -PI && c.long <= PI);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{midpoint, Coordinate};
+
+    fn equal_float(f0: f32, f1: f32) -> bool {
+        (f0 - f1).abs() <= crate::MIN_2D_POLAR_COORDINATE_ERROR
+    }
+
+    fn assert_equal_midpoint(c0: Coordinate, c1: Coordinate, expected: Coordinate) {
+        let midpoint01 = midpoint(c0, c1);
+        let midpoint10 = midpoint(c1, c0);
+        assert!(equal_float(midpoint01.lat, midpoint10.lat));
+        assert!(equal_float(dbg!(midpoint01.long), dbg!(midpoint10.long)));
+
+        assert!(equal_float(midpoint01.lat, expected.lat));
+        assert!(equal_float(midpoint01.long, expected.long));
+    }
+
+    #[test]
+    fn midpoint_179() {
+        let c0 = Coordinate {
+            lat: 0.0,
+            long: -171.0f32.to_radians(),
+        };
+        let c1 = Coordinate {
+            lat: 0.0,
+            long: 170.0f32.to_radians(),
+        };
+        assert_equal_midpoint(
+            c0,
+            c1,
+            Coordinate {
+                lat: 0.0,
+                long: 179.5f32.to_radians(),
+            },
+        );
+    }
+
+    #[test]
+    fn midpoint_0() {
+        let c0 = Coordinate {
+            lat: 0.0,
+            long: 0.0f32.to_radians(),
+        };
+        let c1 = Coordinate {
+            lat: 0.0,
+            long: 180.0f32.to_radians(),
+        };
+        assert_equal_midpoint(
+            c0,
+            c1,
+            Coordinate {
+                lat: 0.0,
+                long: 90.0f32.to_radians(),
+            },
+        );
+    }
+
+    #[test]
+    fn midpoint_180_meridian() {
+        let c0 = Coordinate {
+            lat: 0.0,
+            long: -180f32.to_radians(),
+        };
+        let c1 = Coordinate {
+            lat: 0.0,
+            long: 180.0f32.to_radians(),
+        };
+        assert_equal_midpoint(
+            c0,
+            c1,
+            Coordinate {
+                lat: 0.0,
+                long: 180.0f32.to_radians(),
+            },
+        );
+    }
+}
+
+// fn unwind_longitude(mut long: f32) -> f32 {
+//     if long > TAU {
+//         long = long % TAU;
+//     }
+//     while long < 0.0 {
+//         long += TAU;
+//     }
+//     assert!(long >= 0.0 && long <= TAU)
+
+// }
 
 fn parse_geojson(path: impl AsRef<Path>) -> GeoJson {
     let geojson_str = fs::read_to_string(path).unwrap();
@@ -152,20 +310,22 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                 let mut rings = Vec::new();
                 for ring in polygon.rings() {
                     match ring {
-                        PolygonRing::Outer(points) => if rings.is_empty() {
-                            rings.push(points_to_ring(points));
-                        } else {
-                            let triangles = process_polygon_with_holes(&rings);
-                            vertices.extend(triangles);
-                            rings.clear();
-                            rings.push(points_to_ring(points));
-                        },
+                        PolygonRing::Outer(points) => {
+                            if rings.is_empty() {
+                                rings.push(points_to_ring(points));
+                            } else {
+                                let triangles = process_polygon_with_holes(&rings);
+                                vertices.extend(triangles);
+                                rings.clear();
+                                rings.push(points_to_ring(points));
+                            }
+                        }
                         PolygonRing::Inner(points) => {
                             rings.push(points_to_ring(points));
                         }
                     }
                 }
-            },
+            }
             _ => unimplemented!(),
         }
     }
