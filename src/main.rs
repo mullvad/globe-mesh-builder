@@ -65,7 +65,9 @@ struct Output {
     ///
     /// The `*3` part comes from the fact that the `indices` says which vertice,
     /// to pull from `positions`, and each vertice occupies three elements in `positions`.
+    #[serde(rename = "triangleIndices")]
     triangle_indices: Vec<u32>,
+    #[serde(rename = "contourIndices")]
     contour_indices: Vec<u32>,
 }
 
@@ -175,7 +177,7 @@ fn run(args: Args) {
     );
 
     let mut stdout = std::io::stdout().lock();
-    write!(stdout, "const globeData = ").unwrap();
+    write!(stdout, "const landData = ").unwrap();
     if args.pretty {
         serde_json::to_writer_pretty(stdout, &output).unwrap();
     } else {
