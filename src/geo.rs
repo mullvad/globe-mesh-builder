@@ -332,8 +332,11 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                     match ring {
                         PolygonRing::Outer(points) => {
                             if rings.is_empty() {
+                                // First ring in a shape is always the outer ring. But don't
+                                // compute triangles yet, since it might contain inner rings.
                                 rings.push(ring_points_to_vec(points));
                             } else {
+                                // An outer ring means we start on a new shape. So compute
                                 let triangles = process_polygon_with_holes(&rings);
                                 vertices.extend(triangles);
                                 rings.clear();
@@ -346,6 +349,12 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                             contours.push(ring_points_to_coordinates(points));
                         }
                     }
+                }
+                // If we have accumulated rings without making triangles out of them,
+                // do it now. This entire loop should really be rewritten into something better.
+                if !rings.is_empty() {
+                    let triangles = process_polygon_with_holes(&rings);
+                    vertices.extend(triangles);
                 }
             }
             _ => unimplemented!(),
