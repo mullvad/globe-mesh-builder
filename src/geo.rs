@@ -297,9 +297,9 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
 
     for result in reader.iter_shapes_and_records() {
         let (shape, record) = result.unwrap();
-        // println!("Shape: {}, records:", shape);
+        // log::debug!("Shape: {}, records:", shape);
         // for (name, value) in record {
-        //     println ! ("\t{}: {:?}, ", name, value);
+        //     log::debug!("\t{}: {:?}, ", name, value);
         // }
         // FIXME: There is a triangle subdivide bug currently not allowing subdivision of
         // triangles spanning over poles. As a quick hack we remove Antarctica until that's fixed
