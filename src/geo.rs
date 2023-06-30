@@ -4,7 +4,6 @@ use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
 use std::hash::Hash;
 use std::path::Path;
-use total_float_wrap::TotalF32;
 
 const MAX_COORDINATE_ANGLE_RAD: f32 = (5.0 / 180.0) * PI;
 use crate::MIN_2D_POLAR_COORDINATE_ERROR;
@@ -297,6 +296,10 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
         // for (name, value) in record {
         //     log::debug!("\t{}: {:?}, ", name, value);
         // }
+        let country_name = match record.get("NAME") {
+            Some(&FieldValue::Character(Some(ref name))) => name,
+            _ => "N/A",
+        };
         // FIXME: There is a triangle subdivide bug currently not allowing subdivision of
         // triangles spanning over poles. As a quick hack we remove Antarctica until that's fixed
         match record.get("CONTINENT") {
@@ -333,8 +336,11 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                                 rings.push(ring_points_to_vec(points));
                             } else {
                                 // An outer ring means we start on a new shape. So compute
-                                let triangles = process_polygon_with_holes(&rings);
-                                vertices.extend(triangles);
+                                if let Ok(triangles) = process_polygon_with_holes(&rings) {
+                                    vertices.extend(triangles);
+                                } else {
+                                    log::error!("Failed to process a polygon for {country_name}");
+                                }
                                 rings.clear();
                                 rings.push(ring_points_to_vec(points));
                             }
@@ -349,8 +355,11 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                 // If we have accumulated rings without making triangles out of them,
                 // do it now. This entire loop should really be rewritten into something better.
                 if !rings.is_empty() {
-                    let triangles = process_polygon_with_holes(&rings);
-                    vertices.extend(triangles);
+                    if let Ok(triangles) = process_polygon_with_holes(&rings) {
+                        vertices.extend(triangles);
+                    } else {
+                        log::error!("Failed to process a polygon for {country_name}");
+                    }
                 }
             }
             _ => unimplemented!(),
@@ -360,7 +369,7 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
 }
 
 /// Takes a 2D polygon, performs earcutr and returns the 2D triangles with radian coordinates.
-fn process_polygon_with_holes(polygon: &PolygonWithHoles) -> Vec<Triangle> {
+fn process_polygon_with_holes(polygon: &PolygonWithHoles) -> Result<Vec<Triangle>, earcutr::Error> {
     let (flat_vertices, hole_indices, dims) = earcutr::flatten(polygon);
     assert_eq!(dims, 2);
     // Convert coordinates to radians and lower resolution to f32 and use for the rest of the program
@@ -369,7 +378,7 @@ fn process_polygon_with_holes(polygon: &PolygonWithHoles) -> Vec<Triangle> {
         .map(|f: f64| f.to_radians() as f32)
         .collect::<Vec<_>>();
 
-    let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims);
+    let triangle_vertice_start_indices = earcutr::earcut(&flat_vertices, &hole_indices, dims)?;
     let mut output = Vec::with_capacity(triangle_vertice_start_indices.len() / 3);
     for &[i, j, k] in triangle_vertice_start_indices.as_chunks::<3>().0 {
         let c0 = Coordinate {
@@ -387,5 +396,5 @@ fn process_polygon_with_holes(polygon: &PolygonWithHoles) -> Vec<Triangle> {
         let triangle = Triangle::from([c0, c1, c2]);
         output.push(triangle);
     }
-    output
+    Ok(output)
 }
