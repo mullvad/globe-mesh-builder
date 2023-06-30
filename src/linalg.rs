@@ -33,9 +33,19 @@ impl Mul<f32> for Vertex {
     }
 }
 
+/// Represent a vertex as three integers where the coordinates are rounded off.
+/// Used for equality/hash comparison to make vertices close to each other
+/// say that they are the same.
+fn round_vertex(v: Vertex) -> [i128; 3] {
+    const VERTEX_ROUNDING: f32 = 1000.0;
+    v.0.into_array().map(|f| (f * VERTEX_ROUNDING) as i128)
+}
+
 impl PartialEq for Vertex {
     fn eq(&self, other: &Self) -> bool {
-        (self.0 - other.0).length() <= f32::EPSILON
+        let self_rounded = round_vertex(*self);
+        let other_rounded = round_vertex(*other);
+        self_rounded == other_rounded
     }
 }
 
@@ -43,10 +53,7 @@ impl Eq for Vertex {}
 
 impl Hash for Vertex {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let [v0, v1, v2] = self.0.into_array();
-        TotalF32(v0).hash(state);
-        TotalF32(v1).hash(state);
-        TotalF32(v2).hash(state);
+        round_vertex(*self).hash(state);
     }
 }
 
