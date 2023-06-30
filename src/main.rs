@@ -40,10 +40,6 @@ struct Args {
     /// to not take a too noticeable shortcut through the sphere.
     #[arg(long)]
     subdivide: bool,
-
-    /// If true, outputs a sphere (to use for ocean) instead of the geo data
-    #[arg(long)]
-    ocean: bool,
 }
 
 /// The structur this program outputs (in JSON format).
@@ -89,46 +85,15 @@ fn main() {
 }
 
 fn run(args: Args) {
-    if args.ocean {
-        let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
-        let mut output = SphereOutput {
-            positions: Vec::new(),
-            indices: Vec::new(),
-        };
-        for vertex in icosahedron_vertices(4, 0.998) {
-            let next_index = u32::try_from(seen_vertices.len()).unwrap();
-            match seen_vertices.entry(vertex) {
-                Entry::Occupied(entry) => {
-                    // This vertex is already in `output.positions`,
-                    // just push the index
-                    output.indices.push(*entry.get());
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(next_index);
-                    output.indices.push(next_index);
-                    output.positions.extend(vertex.to_vector().into_array());
-                }
-            }
-        }
-        log::info!(
-            "Outputting {}/{} vertices",
-            seen_vertices.len(),
-            output.indices.len()
-        );
-        let mut stdout = std::io::stdout().lock();
-        write!(stdout, "const oceanData = ").unwrap();
-        if args.pretty {
-            serde_json::to_writer_pretty(stdout, &output).unwrap();
-        } else {
-            serde_json::to_writer(stdout, &output).unwrap();
-        }
-        return;
-    }
+    let mut stdout = std::io::stdout().lock();
+
+    let ocean = ocean_vertices();
+    write_js_const(&mut stdout, "oceanData", &ocean);
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
-    let mut output = Output {
+    let mut land_output = Output {
         positions: Vec::new(),
         triangle_indices: Vec::new(),
         contour_indices: Vec::new(),
@@ -141,12 +106,14 @@ fn run(args: Args) {
             Entry::Occupied(entry) => {
                 // This vertex is already in `output.positions`,
                 // just push the index
-                output.triangle_indices.push(*entry.get());
+                land_output.triangle_indices.push(*entry.get());
             }
             Entry::Vacant(entry) => {
                 entry.insert(next_index);
-                output.triangle_indices.push(next_index);
-                output.positions.extend(vertex.to_vector().into_array());
+                land_output.triangle_indices.push(next_index);
+                land_output
+                    .positions
+                    .extend(vertex.to_vector().into_array());
             }
         }
     }
@@ -158,12 +125,14 @@ fn run(args: Args) {
                     Entry::Occupied(entry) => {
                         // This vertex is already in `output.positions`,
                         // just push the index
-                        output.contour_indices.push(*entry.get());
+                        land_output.contour_indices.push(*entry.get());
                     }
                     Entry::Vacant(entry) => {
                         entry.insert(next_index);
-                        output.contour_indices.push(next_index);
-                        output.positions.extend(vertex.to_vector().into_array());
+                        land_output.contour_indices.push(next_index);
+                        land_output
+                            .positions
+                            .extend(vertex.to_vector().into_array());
                     }
                 }
             }
@@ -176,13 +145,42 @@ fn run(args: Args) {
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
 
-    let mut stdout = std::io::stdout().lock();
-    write!(stdout, "const landData = ").unwrap();
-    if args.pretty {
-        serde_json::to_writer_pretty(stdout, &output).unwrap();
-    } else {
-        serde_json::to_writer(stdout, &output).unwrap();
+    write_js_const(&mut stdout, "landData", &land_output);
+}
+
+fn write_js_const<W: Write>(mut output: W, const_name: &str, data: &impl serde::Serialize) {
+    write!(&mut output, "const {const_name} = ").unwrap();
+    serde_json::to_writer(&mut output, data).unwrap();
+    writeln!(&mut output, ";").unwrap();
+}
+
+fn ocean_vertices() -> SphereOutput {
+    let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
+    let mut output = SphereOutput {
+        positions: Vec::new(),
+        indices: Vec::new(),
+    };
+    for vertex in icosahedron_vertices(4, 0.998) {
+        let next_index = u32::try_from(seen_vertices.len()).unwrap();
+        match seen_vertices.entry(vertex) {
+            Entry::Occupied(entry) => {
+                // This vertex is already in `output.positions`,
+                // just push the index
+                output.indices.push(*entry.get());
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(next_index);
+                output.indices.push(next_index);
+                output.positions.extend(vertex.to_vector().into_array());
+            }
+        }
     }
+    log::info!(
+        "Outputting {}/{} vertices",
+        seen_vertices.len(),
+        output.indices.len()
+    );
+    output
 }
 
 pub fn world_vertices(
