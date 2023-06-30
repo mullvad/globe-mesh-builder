@@ -28,9 +28,9 @@ pub const MIN_2D_POLAR_COORDINATE_ERROR: f32 = f32::EPSILON * 2.0;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Path to the GeoJSON input file to process
-    #[arg(short, long)]
-    geojson: PathBuf,
+    /// Path(s) to the .shp input file(s) to process
+    #[arg(long)]
+    shp: Vec<PathBuf>,
 
     /// If the output should be pretty json or not
     #[arg(long)]
@@ -125,7 +125,7 @@ fn run(args: Args) {
         return;
     }
 
-    let (triangles, contours) = world_vertices(args.geojson, args.subdivide);
+    let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut output = Output {
@@ -186,10 +186,17 @@ fn run(args: Args) {
 }
 
 pub fn world_vertices(
-    geojson_path: impl AsRef<Path>,
+    world_shp_paths: &[impl AsRef<Path>],
     subdivide: bool,
 ) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
-    let (world_triangles, world_contours) = geo::read_world(geojson_path);
+    let mut world_triangles = Vec::new();
+    let mut world_contours = Vec::new();
+    for world_shp_path in world_shp_paths {
+        let (triangles, contours) = geo::read_world(world_shp_path);
+        world_triangles.extend(triangles);
+        world_contours.extend(contours);
+    }
+
     let num_2d_triangles = world_triangles.len();
     log::info!(
         "Parsed and earcutrd GeoJson has {} triangles",

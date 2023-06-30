@@ -362,6 +362,11 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                     }
                 }
             }
+            Shape::Polyline(line) => {
+                for part in line.parts() {
+                    contours.push(ring_points_to_coordinates(part));
+                }
+            }
             _ => unimplemented!(),
         }
     }
