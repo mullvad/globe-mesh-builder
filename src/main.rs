@@ -190,7 +190,6 @@ pub fn world_vertices(
     subdivide: bool,
 ) -> (Vec<Vertex>, Vec<Vec<Vertex>>) {
     let (world_triangles, world_contours) = geo::read_world(geojson_path);
-    // let (world_triangles, world_contours) = geo::triangulate_geojson(geojson_path);
     let num_2d_triangles = world_triangles.len();
     log::info!(
         "Parsed and earcutrd GeoJson has {} triangles",
