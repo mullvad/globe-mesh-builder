@@ -1,10 +1,11 @@
 use geojson::{GeoJson, Geometry, PolygonType, Value};
+use shapefile::dbase::FieldValue;
 use shapefile::{Point, PolygonRing, Shape};
 use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
+use std::fs;
 use std::hash::Hash;
 use std::path::Path;
-use std::fs;
 use total_float_wrap::TotalF32;
 
 const MAX_COORDINATE_ANGLE_RAD: f32 = (5.0 / 180.0) * PI;
@@ -295,11 +296,20 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
     let mut contours = Vec::new();
 
     for result in reader.iter_shapes_and_records() {
-        let (shape, _record) = result.unwrap();
+        let (shape, record) = result.unwrap();
         // println!("Shape: {}, records:", shape);
         // for (name, value) in record {
         //     println ! ("\t{}: {:?}, ", name, value);
         // }
+        // FIXME: There is a triangle subdivide bug currently not allowing subdivision of
+        // triangles spanning over poles. As a quick hack we remove Antarctica until that's fixed
+        match record.get("CONTINENT") {
+            Some(&FieldValue::Character(Some(ref continent))) if continent == "Antarctica" => {
+                log::debug!("Skipping antarctica");
+                continue;
+            }
+            _ => (),
+        }
 
         fn points_to_ring(points: &Vec<Point>) -> Vec<Vec<f64>> {
             points.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>()
