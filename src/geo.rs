@@ -311,8 +311,18 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
             _ => (),
         }
 
-        fn points_to_ring(points: &Vec<Point>) -> Vec<Vec<f64>> {
+        fn ring_points_to_vec(points: &[Point]) -> Vec<Vec<f64>> {
             points.iter().map(|p| vec![p.x, p.y]).collect::<Vec<_>>()
+        }
+
+        fn ring_points_to_coordinates(points: &[Point]) -> Vec<Coordinate> {
+            points
+                .iter()
+                .map(|p| Coordinate {
+                    lat: p.y.to_radians() as f32,
+                    long: p.x.to_radians() as f32,
+                })
+                .collect::<Vec<_>>()
         }
 
         match shape {
@@ -322,16 +332,18 @@ pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>
                     match ring {
                         PolygonRing::Outer(points) => {
                             if rings.is_empty() {
-                                rings.push(points_to_ring(points));
+                                rings.push(ring_points_to_vec(points));
                             } else {
                                 let triangles = process_polygon_with_holes(&rings);
                                 vertices.extend(triangles);
                                 rings.clear();
-                                rings.push(points_to_ring(points));
+                                rings.push(ring_points_to_vec(points));
                             }
+                            contours.push(ring_points_to_coordinates(points));
                         }
                         PolygonRing::Inner(points) => {
-                            rings.push(points_to_ring(points));
+                            rings.push(ring_points_to_vec(points));
+                            contours.push(ring_points_to_coordinates(points));
                         }
                     }
                 }
