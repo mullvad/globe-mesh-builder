@@ -95,7 +95,7 @@ fn run(args: Args) {
             positions: Vec::new(),
             indices: Vec::new(),
         };
-        for vertex in icosahedron_vertices(4, 0.999) {
+        for vertex in icosahedron_vertices(4, 0.998) {
             let next_index = u32::try_from(seen_vertices.len()).unwrap();
             match seen_vertices.entry(vertex) {
                 Entry::Occupied(entry) => {
