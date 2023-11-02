@@ -39,7 +39,7 @@ struct Args {
 }
 
 /// The structur this program outputs (in JSON format).
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
 struct Output {
     /// A vector with vertice float values for OpenGL to render. each group of three
     /// floats is one vertice. So `(positions[x], positions[x+1], positions[x+2])` is
@@ -57,13 +57,11 @@ struct Output {
     ///
     /// The `*3` part comes from the fact that the `indices` says which vertice,
     /// to pull from `positions`, and each vertice occupies three elements in `positions`.
-    #[serde(rename = "triangleIndices")]
     triangle_indices: Vec<u32>,
-    #[serde(rename = "contourIndices")]
     contour_indices: Vec<u32>,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug)]
 struct SphereOutput {
     positions: Vec<f32>,
     indices: Vec<u32>,

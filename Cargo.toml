@@ -1,14 +1,13 @@
 [package]
-name = "geojson-processor"
+name = "globe-mesh-builder"
+description = "Parses SHP (shapefiles) and produce OpenGL compatible vertex and index buffers for drawing a spherical world map (globe)"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+publish = false
 
 [dependencies]
 vecmat = "0.7.8"
 earcutr = "0.4.2"
-serde = { version = "1.0.145", features = ["derive"] }
 log = "0.4.17"
 clap = { version = "4.0.13", features = ["derive"] }
 env_logger = "0.10.0"

@@ -218,20 +218,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "geojson-processor"
-version = "0.1.0"
-dependencies = [
- "clap",
- "earcutr",
- "env_logger",
- "log",
- "serde",
- "shapefile",
- "total_float_wrap",
- "vecmat",
-]
-
-[[package]]
 name = "getrandom"
 version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -240,6 +226,19 @@ dependencies = [
  "cfg-if",
  "libc",
  "wasi",
+]
+
+[[package]]
+name = "globe-mesh-builder"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "earcutr",
+ "env_logger",
+ "log",
+ "shapefile",
+ "total_float_wrap",
+ "vecmat",
 ]
 
 [[package]]
