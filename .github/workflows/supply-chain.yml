@@ -1,0 +1,36 @@
+
+name: Audit supply chain
+on:
+  push:
+  schedule:
+    # At 06:20 UTC every day. Will create an issue if a CVE is found.
+    - cron: '20 6 * * *'
+  # Build if requested manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: --deny warnings
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/audit@v1
+        name: Audit Rust Dependencies
+        with:
+          denyWarnings: true
+
+  check-supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v1
+        with:
+          log-level: warn
+          command: check all
