@@ -17,7 +17,6 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
 
 mod geo;
 mod linalg;
@@ -77,15 +76,7 @@ struct SphereOutput {
 fn main() {
     env_logger::init();
     let args = Args::parse();
-    thread::Builder::new()
-        .stack_size(1024 * 100)
-        .spawn(|| run(args))
-        .unwrap()
-        .join()
-        .unwrap();
-}
 
-fn run(args: Args) {
     let ocean = ocean_vertices();
     write_buffer_f32("geodata/ocean_positions.bin", &ocean.positions);
     write_buffer_u32("geodata/ocean_indices.bin", &ocean.indices);
