@@ -1,6 +1,5 @@
 use shapefile::dbase::FieldValue;
 use shapefile::{Point, PolygonRing, Shape};
-use std::collections::HashSet;
 use std::f32::consts::{PI, TAU};
 use std::hash::Hash;
 use std::path::Path;
@@ -61,19 +60,12 @@ impl From<[Coordinate; 3]> for Triangle {
 /// Takes a geo triangle as input, looks at the lat and long angles between the coordinates
 /// and cuts all edges in half that has one angle larger than MAX_COORDINATE_ANGLE_RAD
 /// and recurse until no angle is too large.
-pub fn subdivide_triangle(
-    triangle: Triangle,
-    seen_triangles: &mut HashSet<Triangle>,
-) -> Vec<Triangle> {
+pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
     log::debug!("Subdividing {:?}", triangle);
     let [c0, c1, c2] = triangle.to_coordinates();
     if c0 == c1 || c1 == c2 || c2 == c0 {
         log::debug!("Triangle with zero area!");
         return vec![triangle];
-    }
-
-    if !seen_triangles.insert(triangle) {
-        panic!("We have already seen {triangle:?}");
     }
 
     fn largest_angle(c0: Coordinate, c1: Coordinate) -> f32 {
@@ -129,8 +121,8 @@ pub fn subdivide_triangle(
     let mut output = Vec::with_capacity(2);
 
     let [new_triangle1, new_triangle2] = split_triangle(rotated_triangle);
-    output.extend(subdivide_triangle(new_triangle1, seen_triangles));
-    output.extend(subdivide_triangle(new_triangle2, seen_triangles));
+    output.extend(subdivide_triangle(new_triangle1));
+    output.extend(subdivide_triangle(new_triangle2));
     output
 }
 

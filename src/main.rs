@@ -11,7 +11,7 @@
 
 use clap::Parser;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::f32::consts::PI;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -221,7 +221,7 @@ pub fn world_vertices(
     let mut world_contours_sphere = Vec::with_capacity(world_contours.len());
     for triangle_2d in world_triangles {
         if subdivide {
-            for subdivided_triangle in geo::subdivide_triangle(triangle_2d, &mut HashSet::new()) {
+            for subdivided_triangle in geo::subdivide_triangle(triangle_2d) {
                 world_triangles_sphere.push(geo_triangle_to_sphere(subdivided_triangle));
             }
             log::debug!("");
@@ -267,8 +267,6 @@ fn latlong2xyz(c: geo::Coordinate) -> Vertex {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use super::*;
 
     #[test]
@@ -302,7 +300,7 @@ mod tests {
                 long: -2.513102,
             },
         ]);
-        geo::subdivide_triangle(broken_triangle, &mut HashSet::new());
+        geo::subdivide_triangle(broken_triangle);
     }
 
     #[test]
