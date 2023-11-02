@@ -32,10 +32,6 @@ struct Args {
     #[arg(long)]
     shp: Vec<PathBuf>,
 
-    /// If the output should be pretty json or not
-    #[arg(long)]
-    pretty: bool,
-
     /// If too long triangle edges should be cut down into smaller sections
     /// to not take a too noticeable shortcut through the sphere.
     #[arg(long)]
