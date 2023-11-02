@@ -71,9 +71,6 @@ pub fn subdivide_triangle(
         log::debug!("Triangle with zero area!");
         return vec![triangle];
     }
-    // assert_ne!(c0, c1);
-    // assert_ne!(c0, c2);
-    // assert_ne!(c1, c2);
 
     if !seen_triangles.insert(triangle) {
         panic!("We have already seen {triangle:?}");
@@ -91,23 +88,24 @@ pub fn subdivide_triangle(
 
         d_lat.max(d_long.abs())
     }
-    let d01 = dbg!(largest_angle(c0, c1));
-    let d12 = dbg!(largest_angle(c1, c2));
-    let d20 = dbg!(largest_angle(c2, c0));
+    let d01 = largest_angle(c0, c1);
+    let d12 = largest_angle(c1, c2);
+    let d20 = largest_angle(c2, c0);
 
     let mut too_long_side = false;
     if d01 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
-        eprintln!("c0-c1 is too long: {d01}");
+        log::debug!("c0-c1 is too long: {d01}");
     }
     if d12 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
-        eprintln!("c1-c2 is too long: {d12}");
+        log::debug!("c1-c2 is too long: {d12}");
     }
     if d20 > MAX_COORDINATE_ANGLE_RAD {
         too_long_side = true;
-        eprintln!("c2-c0 is too long: {d20}");
+        log::debug!("c2-c0 is too long: {d20}");
     }
+    // Base case. Triangle is not large enough to need subdivision. Stop recursion.
     if !too_long_side {
         return vec![triangle];
     }
