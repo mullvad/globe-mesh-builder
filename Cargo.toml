@@ -1,7 +1,10 @@
 [package]
 name = "globe-mesh-builder"
-description = "Parses SHP (shapefiles) and produce OpenGL compatible vertex and index buffers for drawing a spherical world map (globe)"
 version = "0.1.0"
+description = "Parses SHP (shapefiles) and produce OpenGL compatible vertex and index buffers for drawing a spherical world map (globe)"
+authors = ["Linus Färnstrand <faern@faern.net>", "Mullvad VPN"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mullvad/globe-mesh-builder"
 edition = "2021"
 publish = false
 
