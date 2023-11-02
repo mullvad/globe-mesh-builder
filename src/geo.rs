@@ -164,14 +164,6 @@ fn midpoint(c0: Coordinate, c1: Coordinate) -> Coordinate {
     output
 }
 
-pub fn clean_triangle_coordinates(triangle: Triangle) -> Triangle {
-    let [mut c0, mut c1, mut c2] = triangle.to_coordinates();
-    clean_coordinate(&mut c0);
-    clean_coordinate(&mut c1);
-    clean_coordinate(&mut c2);
-    Triangle::from([c0, c1, c2])
-}
-
 fn clean_coordinate(c: &mut Coordinate) {
     if c.long <= -PI {
         c.long += TAU;

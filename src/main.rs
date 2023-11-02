@@ -220,7 +220,6 @@ pub fn world_vertices(
     let mut world_triangles_sphere = Vec::with_capacity(world_triangles.len());
     let mut world_contours_sphere = Vec::with_capacity(world_contours.len());
     for triangle_2d in world_triangles {
-        let triange_2d = geo::clean_triangle_coordinates(triangle_2d);
         if subdivide {
             for subdivided_triangle in geo::subdivide_triangle(triangle_2d, &mut HashSet::new()) {
                 world_triangles_sphere.push(geo_triangle_to_sphere(subdivided_triangle));
