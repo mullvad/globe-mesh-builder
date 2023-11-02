@@ -226,7 +226,6 @@ pub fn world_vertices(
     for triangle_2d in world_triangles {
         let triange_2d = geo::clean_triangle_coordinates(triangle_2d);
         if subdivide {
-            log::debug!("LOLOLOL Subdividing {:?}", triangle_2d);
             for subdivided_triangle in geo::subdivide_triangle(triangle_2d, &mut HashSet::new()) {
                 world_triangles_sphere.push(geo_triangle_to_sphere(subdivided_triangle));
             }
