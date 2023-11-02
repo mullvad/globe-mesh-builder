@@ -129,6 +129,7 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
 /// Splits a triangle into two. The edge that is cut into two is the one between c1 and c2.
 fn split_triangle(triangle: Triangle) -> [Triangle; 2] {
     let [c0, c1, c2] = triangle.to_coordinates();
+    assert_ne!(c1, c2);
     let c1c2_midpoint = midpoint(c1, c2);
     [
         Triangle::from([c0, c1, c1c2_midpoint]),
@@ -136,8 +137,9 @@ fn split_triangle(triangle: Triangle) -> [Triangle; 2] {
     ]
 }
 
-fn midpoint(c0: Coordinate, c1: Coordinate) -> Coordinate {
-    assert_ne!(c0, c1);
+fn midpoint(mut c0: Coordinate, mut c1: Coordinate) -> Coordinate {
+    clean_coordinate(&mut c0);
+    clean_coordinate(&mut c1);
     let mut d_long = c1.long - c0.long;
     if d_long > PI {
         d_long -= TAU;
@@ -149,8 +151,6 @@ fn midpoint(c0: Coordinate, c1: Coordinate) -> Coordinate {
         long: c0.long + (d_long / 2.0),
     };
     clean_coordinate(&mut output);
-    assert_ne!(output, c0);
-    assert_ne!(output, c1);
     output
 }
 

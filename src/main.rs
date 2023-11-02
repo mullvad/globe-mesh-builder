@@ -212,7 +212,7 @@ pub fn world_vertices(
 
     let num_2d_triangles = world_triangles.len();
     log::info!(
-        "Parsed and earcutrd GeoJson has {} triangles",
+        "Parsed and earcutrd world mesh has {} triangles",
         num_2d_triangles
     );
     log::debug!("Number of world contours: {}", world_contours.len());
@@ -268,6 +268,7 @@ fn latlong2xyz(c: geo::Coordinate) -> Vertex {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::TAU;
 
     #[test]
     fn subdivide_broken_triangle() {
@@ -287,15 +288,15 @@ mod tests {
         // ]);
 
         let broken_triangle = geo::Triangle::from([
-            Coordinate {
+            geo::Coordinate {
                 lat: 1.2223023,
                 long: -2.5530975,
             },
-            Coordinate {
+            geo::Coordinate {
                 lat: 1.2225933,
                 long: -2.5593796,
             },
-            Coordinate {
+            geo::Coordinate {
                 lat: 1.2190795,
                 long: -2.513102,
             },
