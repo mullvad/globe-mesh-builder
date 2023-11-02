@@ -35,6 +35,9 @@ struct Args {
     /// to not take a too noticeable shortcut through the sphere.
     #[arg(long)]
     subdivide: bool,
+
+    #[arg(long = "out")]
+    out_dir: PathBuf,
 }
 
 /// The structur this program outputs (in JSON format).
@@ -71,8 +74,8 @@ fn main() {
     let args = Args::parse();
 
     let ocean = ocean_vertices();
-    write_buffer_f32("geodata/ocean_positions.bin", &ocean.positions);
-    write_buffer_u32("geodata/ocean_indices.bin", &ocean.indices);
+    write_buffer_f32(args.out_dir.join("ocean_positions.bin"), &ocean.positions);
+    write_buffer_u32(args.out_dir.join("ocean_indices.bin"), &ocean.indices);
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
@@ -129,13 +132,16 @@ fn main() {
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
 
-    write_buffer_f32("geodata/land_positions.bin", &land_output.positions);
+    write_buffer_f32(
+        args.out_dir.join("land_positions.bin"),
+        &land_output.positions,
+    );
     write_buffer_u32(
-        "geodata/land_triangle_indices.bin",
+        args.out_dir.join("land_triangle_indices.bin"),
         &land_output.triangle_indices,
     );
     write_buffer_u32(
-        "geodata/land_contour_indices.bin",
+        args.out_dir.join("land_contour_indices.bin"),
         &land_output.contour_indices,
     );
 }
