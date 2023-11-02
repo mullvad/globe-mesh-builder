@@ -14,6 +14,7 @@ use geo::Coordinate;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -85,10 +86,9 @@ fn main() {
 }
 
 fn run(args: Args) {
-    let mut stdout = std::io::stdout().lock();
-
     let ocean = ocean_vertices();
-    write_js_const(&mut stdout, "oceanData", &ocean);
+    write_buffer_f32("geodata/ocean_positions.bin", &ocean.positions);
+    write_buffer_u32("geodata/ocean_indices.bin", &ocean.indices);
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
@@ -145,13 +145,41 @@ fn run(args: Args) {
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
 
-    write_js_const(&mut stdout, "landData", &land_output);
+    write_buffer_f32("geodata/land_positions.bin", &land_output.positions);
+    write_buffer_u32(
+        "geodata/land_triangle_indices.bin",
+        &land_output.triangle_indices,
+    );
+    write_buffer_u32(
+        "geodata/land_contour_indices.bin",
+        &land_output.contour_indices,
+    );
 }
 
-fn write_js_const<W: Write>(mut output: W, const_name: &str, data: &impl serde::Serialize) {
-    write!(&mut output, "const {const_name} = ").unwrap();
-    serde_json::to_writer(&mut output, data).unwrap();
-    writeln!(&mut output, ";").unwrap();
+fn write_buffer_f32(path: impl AsRef<Path>, data: &[f32]) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .unwrap();
+    for position in data {
+        file.write_all(&position.to_ne_bytes()).unwrap();
+    }
+    file.flush().unwrap();
+}
+
+fn write_buffer_u32(path: impl AsRef<Path>, data: &[u32]) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+        .unwrap();
+    for position in data {
+        file.write_all(&position.to_ne_bytes()).unwrap();
+    }
+    file.flush().unwrap();
 }
 
 fn ocean_vertices() -> SphereOutput {
