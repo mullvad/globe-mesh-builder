@@ -233,7 +233,7 @@ pub fn world_vertices(
         }
     }
     for contour in world_contours {
-        world_contours_sphere.push(contour.into_iter().map(|c| latlong2xyz(c)).collect());
+        world_contours_sphere.push(contour.into_iter().map(latlong2xyz).collect());
     }
     log::info!(
         "Mapped {} 2D triangles onto {} 3D triangles on a sphere",

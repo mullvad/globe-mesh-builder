@@ -1,11 +1,12 @@
 use crate::geo::Coordinate;
 use crate::{Triangle, Vertex};
 use std::f32::consts::{FRAC_PI_2, TAU};
+use std::mem;
 
 pub fn icosahedron_vertices(subdivide_times: u8, scale: f32) -> Vec<Vertex> {
     let mut triangles = icosahedron_faces();
     for _ in 0..subdivide_times {
-        let old_triangles = core::mem::replace(&mut triangles, Vec::new());
+        let old_triangles = mem::take(&mut triangles);
         for triangle in old_triangles {
             triangles.extend(&subdivide_sphere_face(triangle));
         }
