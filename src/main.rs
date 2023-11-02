@@ -1,4 +1,3 @@
-#![feature(array_chunks)]
 #![feature(slice_as_chunks)]
 #![feature(array_windows)]
 
