@@ -3,6 +3,9 @@
 Tool that parses SHP (shapefiles) and produce OpenGL compatible vertex and index buffers for
 drawing a spherical world map (globe). Used by the app to generate map data.
 
+This currently requires the nightly Rust compiler because it uses some nice features that
+are not yet stable. These can be removed and stable can be used if wanted.
+
 ## Usage
 
 1. Download land and state border data from Natural Earth and unpack them:
@@ -16,11 +19,13 @@ drawing a spherical world map (globe). Used by the app to generate map data.
     unzip ne_50m_admin_1_states_provinces_lines.zip
     ```
 
+1. Install a recent nightly Rust compiler: https://rustup.rs/
+
 1. Run this tool:
     ```
     mkdir geodata
 
-    RUST_LOG=debug cargo run --release -- \
+    RUST_LOG=debug cargo +nightly run --release -- \
         --shp earth_data/ne_50m_admin_0_countries.shp \
         --shp earth_data/ne_50m_admin_1_states_provinces_lines.shp \
         --subdivide
