@@ -6,15 +6,14 @@ use std::hash::Hash;
 use std::path::Path;
 
 const MAX_COORDINATE_ANGLE_RAD: f32 = (5.0 / 180.0) * PI;
-use crate::MIN_2D_POLAR_COORDINATE_ERROR;
 
 /// This is the data format `earcutr` expects. It's conceptually a list of rings.
 /// The first ring being the outer ring and any subsequent rings are inner rings.
 /// Each ring is a list of coordinates. Each cordinate is two floats [long, lat].
 ///
-///                             ___ - two floats, [long, lat]
+///                             ___ - two floats, [long, lat]. But represented with a Vec sadly.
 ///                         ___ - Represents a ring
-///                     ___ - A list of rings. The first ring is outer, the remaining inner
+///                     ___ - A list of rings. The first ring is outer, the remaining inner.
 ///                           Together these form a polygon with holes
 type PolygonWithHoles = Vec<Vec<Vec<f64>>>;
 
@@ -42,18 +41,6 @@ impl Hash for Coordinate {
         f32_round(self.long).hash(state);
     }
 }
-
-// #[cfg(test)]
-// mod coordinate_tests {
-//     use super::Coordinate;
-
-//     #[test]
-//     fn almost_same_coordinate_is_same() {
-//         let c0 = Coordinate {
-//             lat
-//         }
-//     }
-// }
 
 /// An 2D triangle with geo coordinates as radians
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -272,17 +259,6 @@ mod tests {
         );
     }
 }
-
-// fn unwind_longitude(mut long: f32) -> f32 {
-//     if long > TAU {
-//         long = long % TAU;
-//     }
-//     while long < 0.0 {
-//         long += TAU;
-//     }
-//     assert!(long >= 0.0 && long <= TAU)
-
-// }
 
 pub fn read_world(path: impl AsRef<Path>) -> (Vec<Triangle>, Vec<Vec<Coordinate>>) {
     let mut reader = shapefile::Reader::from_path(path).unwrap();

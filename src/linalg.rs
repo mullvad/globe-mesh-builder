@@ -1,6 +1,5 @@
 use std::hash::Hash;
 use std::ops::Mul;
-use total_float_wrap::TotalF32;
 pub use vecmat::Vector;
 
 /// A struct representing a vertex in 3D space.
