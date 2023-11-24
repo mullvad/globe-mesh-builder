@@ -23,13 +23,13 @@ are not yet stable. These can be removed and stable can be used if wanted.
 
 1. Run this tool:
     ```
-    mkdir geodata
+    mkdir globe_mesh
 
     RUST_LOG=debug cargo +nightly run --release -- \
         --shp earth_data/ne_50m_admin_0_countries.shp \
         --shp earth_data/ne_50m_admin_1_states_provinces_lines.shp \
         --subdivide
-        --out geodata/
+        --out globe_mesh/
     ```
 
 ## Output format
