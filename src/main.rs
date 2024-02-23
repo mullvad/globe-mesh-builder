@@ -232,8 +232,11 @@ pub fn world_vertices(
             world_triangles_sphere.push(geo_triangle_to_sphere(triangle_2d));
         }
     }
-    for contour in world_contours {
-        world_contours_sphere.push(contour.into_iter().map(latlong2xyz).collect());
+    for mut contour_line in world_contours {
+        if subdivide {
+            contour_line = geo::subdivide_contour(&contour_line);
+        }
+        world_contours_sphere.push(contour_line.into_iter().map(latlong2xyz).collect());
     }
     log::info!(
         "Mapped {} 2D triangles onto {} 3D triangles on a sphere",
