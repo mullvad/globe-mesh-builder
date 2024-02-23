@@ -10,7 +10,7 @@
 
 use clap::Parser;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -79,6 +79,7 @@ fn main() {
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
+    let center = Vertex::from([0.0, 0.0, 0.0]);
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut land_output = Output {
         positions: Vec::new(),
@@ -104,25 +105,45 @@ fn main() {
             }
         }
     }
-    for contour in contours {
-        for line_vertices in contour.array_windows::<2>() {
-            for &vertex in line_vertices {
-                let next_index = u32::try_from(seen_vertices.len()).unwrap();
-                match seen_vertices.entry(vertex) {
-                    Entry::Occupied(entry) => {
-                        // This vertex is already in `output.positions`,
-                        // just push the index
-                        land_output.contour_indices.push(*entry.get());
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(next_index);
-                        land_output.contour_indices.push(next_index);
-                        land_output
-                            .positions
-                            .extend(vertex.to_vector().into_array());
-                    }
-                }
+    let mut seen_contour_lines: HashSet<Line> = HashSet::new();
+    let mut contour_line_duplicates = 0;
+    let mut add_contour_vertex = |v: Vertex| {
+        // The index of this vertex, *if it has to be added*
+        let next_index = u32::try_from(seen_vertices.len()).unwrap();
+        match seen_vertices.entry(v) {
+            Entry::Occupied(entry) => {
+                // This vertex is already in `output.positions`,
+                // just push the index
+                land_output.contour_indices.push(*entry.get());
             }
+            Entry::Vacant(entry) => {
+                // We have not seen this vertex. Add it
+                entry.insert(next_index);
+                land_output.positions.extend(v.to_vector().into_array());
+                land_output.contour_indices.push(next_index);
+            }
+        }
+    };
+    for contour in contours {
+        let mut extra_vertex = None;
+        for &[v0, v1] in contour.array_windows::<2>() {
+            if seen_contour_lines.contains(&Line { v0, v1 })
+                || seen_contour_lines.contains(&Line { v0: v1, v1: v0 })
+            {
+                contour_line_duplicates += 1;
+                if let Some(last_vertex) = extra_vertex.take() {
+                    add_contour_vertex(last_vertex);
+                    add_contour_vertex(center);
+                }
+            } else {
+                seen_contour_lines.insert(Line { v0, v1 });
+                add_contour_vertex(v0);
+                extra_vertex = Some(v1);
+            }
+        }
+        if let Some(last_vertex) = extra_vertex.take() {
+            add_contour_vertex(last_vertex);
+            add_contour_vertex(center);
         }
     }
 
@@ -131,6 +152,7 @@ fn main() {
         seen_vertices.len(),
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
+    log::info!("Found {contour_line_duplicates} duplicate contour segments");
 
     write_buffer_f32(
         args.out_dir.join("land_positions.bin"),
@@ -249,6 +271,12 @@ pub fn world_vertices(
     }
     log::info!("Converted triangles into {} vertices", vertices.len());
     (vertices, world_contours_sphere)
+}
+
+#[derive(Debug, Hash, Eq, PartialEq)]
+struct Line {
+    v0: Vertex,
+    v1: Vertex,
 }
 
 /// Maps a 2D geo triangle with latitude and longitude coordinates in radians onto
