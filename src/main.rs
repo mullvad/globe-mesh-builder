@@ -79,7 +79,6 @@ fn main() {
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
-    let center = Vertex::from([0.0, 0.0, 0.0]);
     let mut seen_vertices: HashMap<Vertex, u32> = HashMap::new();
     let mut land_output = Output {
         positions: Vec::new(),
@@ -106,7 +105,6 @@ fn main() {
         }
     }
     let mut seen_contour_lines: HashSet<Line> = HashSet::new();
-    let mut contour_line_duplicates = 0;
     let mut add_contour_vertex = |v: Vertex| {
         // The index of this vertex, *if it has to be added*
         let next_index = u32::try_from(seen_vertices.len()).unwrap();
@@ -130,20 +128,22 @@ fn main() {
             if seen_contour_lines.contains(&Line { v0, v1 })
                 || seen_contour_lines.contains(&Line { v0: v1, v1: v0 })
             {
-                contour_line_duplicates += 1;
                 if let Some(last_vertex) = extra_vertex.take() {
                     add_contour_vertex(last_vertex);
-                    add_contour_vertex(center);
+                    add_contour_vertex(last_vertex * 0.99);
                 }
             } else {
                 seen_contour_lines.insert(Line { v0, v1 });
+                if extra_vertex.is_none() {
+                    add_contour_vertex(v0 * 0.99);
+                }
                 add_contour_vertex(v0);
                 extra_vertex = Some(v1);
             }
         }
         if let Some(last_vertex) = extra_vertex.take() {
             add_contour_vertex(last_vertex);
-            add_contour_vertex(center);
+            add_contour_vertex(last_vertex * 0.99);
         }
     }
 
@@ -152,7 +152,6 @@ fn main() {
         seen_vertices.len(),
         seen_vertices.len() as f32 / num_3d_vertices as f32 * 100.0
     );
-    log::info!("Found {contour_line_duplicates} duplicate contour segments");
 
     write_buffer_f32(
         args.out_dir.join("land_positions.bin"),
