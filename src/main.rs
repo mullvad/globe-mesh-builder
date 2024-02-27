@@ -10,7 +10,7 @@
 
 use clap::Parser;
 use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -104,25 +104,46 @@ fn main() {
             }
         }
     }
-    for contour in contours {
-        for line_vertices in contour.array_windows::<2>() {
-            for &vertex in line_vertices {
-                let next_index = u32::try_from(seen_vertices.len()).unwrap();
-                match seen_vertices.entry(vertex) {
-                    Entry::Occupied(entry) => {
-                        // This vertex is already in `output.positions`,
-                        // just push the index
-                        land_output.contour_indices.push(*entry.get());
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(next_index);
-                        land_output.contour_indices.push(next_index);
-                        land_output
-                            .positions
-                            .extend(vertex.to_vector().into_array());
-                    }
-                }
+    let mut seen_contour_lines: HashSet<Line> = HashSet::new();
+    let mut add_contour_vertex = |v: Vertex| {
+        // The index of this vertex, *if it has to be added*
+        let next_index = u32::try_from(seen_vertices.len()).unwrap();
+        match seen_vertices.entry(v) {
+            Entry::Occupied(entry) => {
+                // This vertex is already in `output.positions`,
+                // just push the index
+                land_output.contour_indices.push(*entry.get());
             }
+            Entry::Vacant(entry) => {
+                // We have not seen this vertex. Add it
+                entry.insert(next_index);
+                land_output.positions.extend(v.to_vector().into_array());
+                land_output.contour_indices.push(next_index);
+            }
+        }
+    };
+    for contour in contours {
+        let mut extra_vertex = None;
+        for &[v0, v1] in contour.array_windows::<2>() {
+            if seen_contour_lines.contains(&Line { v0, v1 })
+                || seen_contour_lines.contains(&Line { v0: v1, v1: v0 })
+            {
+                if let Some(last_vertex) = extra_vertex.take() {
+                    add_contour_vertex(last_vertex);
+                    add_contour_vertex(last_vertex * 0.99);
+                }
+            } else {
+                seen_contour_lines.insert(Line { v0, v1 });
+                if extra_vertex.is_none() {
+                    add_contour_vertex(v0 * 0.99);
+                }
+                add_contour_vertex(v0);
+                extra_vertex = Some(v1);
+            }
+        }
+        if let Some(last_vertex) = extra_vertex.take() {
+            add_contour_vertex(last_vertex);
+            add_contour_vertex(last_vertex * 0.99);
         }
     }
 
@@ -232,8 +253,11 @@ pub fn world_vertices(
             world_triangles_sphere.push(geo_triangle_to_sphere(triangle_2d));
         }
     }
-    for contour in world_contours {
-        world_contours_sphere.push(contour.into_iter().map(latlong2xyz).collect());
+    for mut contour_line in world_contours {
+        if subdivide {
+            contour_line = geo::subdivide_contour(&contour_line);
+        }
+        world_contours_sphere.push(contour_line.into_iter().map(latlong2xyz).collect());
     }
     log::info!(
         "Mapped {} 2D triangles onto {} 3D triangles on a sphere",
@@ -246,6 +270,12 @@ pub fn world_vertices(
     }
     log::info!("Converted triangles into {} vertices", vertices.len());
     (vertices, world_contours_sphere)
+}
+
+#[derive(Debug, Hash, Eq, PartialEq)]
+struct Line {
+    v0: Vertex,
+    v1: Vertex,
 }
 
 /// Maps a 2D geo triangle with latitude and longitude coordinates in radians onto

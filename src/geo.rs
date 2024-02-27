@@ -4,7 +4,8 @@ use std::f32::consts::{PI, TAU};
 use std::hash::Hash;
 use std::path::Path;
 
-const MAX_COORDINATE_ANGLE_RAD: f32 = (5.0 / 180.0) * PI;
+const MAX_COORDINATE_ANGLE_RAD_TRIANGLES: f32 = (5.0 / 180.0) * PI;
+const MAX_COORDINATE_ANGLE_RAD_CONTOURS: f32 = (1.0 / 180.0) * PI;
 
 /// This is the data format `earcutr` expects. It's conceptually a list of rings.
 /// The first ring being the outer ring and any subsequent rings are inner rings.
@@ -57,6 +58,35 @@ impl From<[Coordinate; 3]> for Triangle {
     }
 }
 
+/// Takes a line consisting of multiple coordinates and splits each segment (line)
+/// that is too long. Prevents contours from taking a shortcut through the globe too much
+pub fn subdivide_contour(contour: &[Coordinate]) -> Vec<Coordinate> {
+    /// Returns a list of coordinates making up the line between c0 and c1 (excluding c1 itself)
+    /// but split into small enough chunks.
+    fn split_line(c0: Coordinate, c1: Coordinate) -> Vec<Coordinate> {
+        let largest_angle = largest_angle(c0, c1);
+        if largest_angle > MAX_COORDINATE_ANGLE_RAD_CONTOURS {
+            let midpoint = midpoint(c0, c1);
+            let mut output = split_line(c0, midpoint);
+            output.extend(split_line(midpoint, c1));
+            output
+        } else {
+            // Base case. Line is not too long. So return the first coordinate
+            vec![c0]
+        }
+    }
+
+    let mut output_contour = Vec::with_capacity(contour.len());
+    for &[c0, c1] in contour.array_windows::<2>() {
+        output_contour.extend(split_line(c0, c1));
+    }
+    // Since `split_line` does not include the last coordinate, we add it manually
+    if let Some(last_coordinate) = contour.last() {
+        output_contour.push(*last_coordinate);
+    }
+    output_contour
+}
+
 /// Takes a geo triangle as input, looks at the lat and long angles between the coordinates
 /// and cuts all edges in half that has one angle larger than MAX_COORDINATE_ANGLE_RAD
 /// and recurse until no angle is too large.
@@ -68,32 +98,20 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
         return vec![triangle];
     }
 
-    fn largest_angle(c0: Coordinate, c1: Coordinate) -> f32 {
-        let d_lat = (c1.lat - c0.lat).abs();
-
-        let mut d_long = c1.long - c0.long;
-        if d_long > PI {
-            d_long -= TAU;
-        } else if d_long < -PI {
-            d_long += TAU;
-        }
-
-        d_lat.max(d_long.abs())
-    }
     let d01 = largest_angle(c0, c1);
     let d12 = largest_angle(c1, c2);
     let d20 = largest_angle(c2, c0);
 
     let mut too_long_side = false;
-    if d01 > MAX_COORDINATE_ANGLE_RAD {
+    if d01 > MAX_COORDINATE_ANGLE_RAD_TRIANGLES {
         too_long_side = true;
         log::debug!("c0-c1 is too long: {d01}");
     }
-    if d12 > MAX_COORDINATE_ANGLE_RAD {
+    if d12 > MAX_COORDINATE_ANGLE_RAD_TRIANGLES {
         too_long_side = true;
         log::debug!("c1-c2 is too long: {d12}");
     }
-    if d20 > MAX_COORDINATE_ANGLE_RAD {
+    if d20 > MAX_COORDINATE_ANGLE_RAD_TRIANGLES {
         too_long_side = true;
         log::debug!("c2-c0 is too long: {d20}");
     }
@@ -124,6 +142,22 @@ pub fn subdivide_triangle(triangle: Triangle) -> Vec<Triangle> {
     output.extend(subdivide_triangle(new_triangle1));
     output.extend(subdivide_triangle(new_triangle2));
     output
+}
+
+/// Returns the largest of the lat or long angles between two
+/// coordinates. A rough estimate used to decide of i line needs
+/// to be subdivided before translated into 3D.
+fn largest_angle(c0: Coordinate, c1: Coordinate) -> f32 {
+    let d_lat = (c1.lat - c0.lat).abs();
+
+    let mut d_long = c1.long - c0.long;
+    if d_long > PI {
+        d_long -= TAU;
+    } else if d_long < -PI {
+        d_long += TAU;
+    }
+
+    d_lat.max(d_long.abs())
 }
 
 /// Splits a triangle into two. The edge that is cut into two is the one between c1 and c2.
