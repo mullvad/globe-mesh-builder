@@ -74,8 +74,8 @@ fn main() {
     let args = Args::parse();
 
     let ocean = ocean_vertices();
-    write_buffer_f32(args.out_dir.join("ocean_positions.bin"), &ocean.positions);
-    write_buffer_u32(args.out_dir.join("ocean_indices.bin"), &ocean.indices);
+    write_buffer_f32(args.out_dir.join("ocean_positions.gl"), &ocean.positions);
+    write_buffer_u32(args.out_dir.join("ocean_indices.gl"), &ocean.indices);
 
     let (triangles, contours) = world_vertices(&args.shp, args.subdivide);
 
@@ -154,15 +154,15 @@ fn main() {
     );
 
     write_buffer_f32(
-        args.out_dir.join("land_positions.bin"),
+        args.out_dir.join("land_positions.gl"),
         &land_output.positions,
     );
     write_buffer_u32(
-        args.out_dir.join("land_triangle_indices.bin"),
+        args.out_dir.join("land_triangle_indices.gl"),
         &land_output.triangle_indices,
     );
     write_buffer_u32(
-        args.out_dir.join("land_contour_indices.bin"),
+        args.out_dir.join("land_contour_indices.gl"),
         &land_output.contour_indices,
     );
 }
