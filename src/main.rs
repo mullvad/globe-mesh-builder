@@ -11,7 +11,6 @@
 use clap::Parser;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::f32::consts::PI;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -20,7 +19,7 @@ mod geo;
 mod icosahedron;
 mod linalg;
 
-use linalg::{Triangle, Vector, Vertex};
+use linalg::{Triangle, Vertex};
 
 pub const MIN_2D_POLAR_COORDINATE_ERROR: f32 = f32::EPSILON * 2.0;
 
@@ -257,7 +256,7 @@ pub fn world_vertices(
         if subdivide {
             contour_line = geo::subdivide_contour(&contour_line);
         }
-        world_contours_sphere.push(contour_line.into_iter().map(latlong2xyz).collect());
+        world_contours_sphere.push(contour_line.into_iter().map(geo::latlong2xyz).collect());
     }
     log::info!(
         "Mapped {} 2D triangles onto {} 3D triangles on a sphere",
@@ -281,21 +280,7 @@ struct Line {
 /// Maps a 2D geo triangle with latitude and longitude coordinates in radians onto
 /// a sphere with radius 1
 fn geo_triangle_to_sphere(triangle: geo::Triangle) -> Triangle {
-    Triangle::from(triangle.to_coordinates().map(latlong2xyz))
-}
-
-/// Maps a geographical coordinate represented in radians onto a sphere
-/// with radius 1.0, and returns the 3D vector
-fn latlong2xyz(c: geo::Coordinate) -> Vertex {
-    // Polar angle. 0 <= φ <= PI = colatitude in geography
-    let phi = (PI / 2.0) - c.lat;
-    // Azimuthal angle = longitude. -PI <= θ <= PI
-    let theta = c.long;
-
-    let x = phi.sin() * theta.sin();
-    let y = phi.cos();
-    let z = phi.sin() * theta.cos();
-    Vertex::from(Vector::from_array([x, y, z]))
+    Triangle::from(triangle.to_coordinates().map(geo::latlong2xyz))
 }
 
 #[cfg(test)]
@@ -345,54 +330,5 @@ mod tests {
         dbg!((PI + 1.0) % TAU);
         dbg!((-1.0f32) % TAU);
         dbg!((1.0f32) % TAU);
-    }
-
-    #[test]
-    fn latlong2xyz_sanity() {
-        let north_pole1 = geo::Coordinate {
-            lat: PI / 2.0,
-            long: 0.0,
-        };
-        let north_pole2 = geo::Coordinate {
-            lat: PI / 2.0,
-            long: PI / 1.2,
-        };
-        assert_eq!(latlong2xyz(north_pole1), Vertex::from([0.0, 1.0, 0.0]));
-        assert_eq!(latlong2xyz(north_pole2), Vertex::from([0.0, 1.0, 0.0]));
-
-        let south_pole1 = geo::Coordinate {
-            lat: -PI / 2.0,
-            long: 0.0,
-        };
-        let south_pole2 = geo::Coordinate {
-            lat: -PI / 2.0,
-            long: 0.1234,
-        };
-        assert_eq!(latlong2xyz(south_pole1), Vertex::from([0.0, -1.0, 0.0]));
-        assert_eq!(latlong2xyz(south_pole2), Vertex::from([0.0, -1.0, 0.0]));
-
-        let zero = geo::Coordinate {
-            lat: 0.0,
-            long: 0.0,
-        };
-        assert_eq!(latlong2xyz(zero), Vertex::from([0.0, 0.0, 1.0]));
-
-        let backside_equator = geo::Coordinate { lat: 0.0, long: PI };
-        assert_eq!(
-            latlong2xyz(backside_equator),
-            Vertex::from([0.0, 0.0, -1.0])
-        );
-
-        let to_the_right = geo::Coordinate {
-            lat: 0.0,
-            long: PI / 2.0,
-        };
-        assert_eq!(latlong2xyz(to_the_right), Vertex::from([1.0, 0.0, 0.0]));
-
-        let to_the_left = geo::Coordinate {
-            lat: 0.0,
-            long: -PI / 2.0,
-        };
-        assert_eq!(latlong2xyz(to_the_left), Vertex::from([-1.0, 0.0, 0.0]));
     }
 }

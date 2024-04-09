@@ -20,7 +20,7 @@ pub fn icosahedron_vertices(subdivide_times: u8, scale: f32) -> Vec<Vertex> {
 }
 
 fn icosahedron_faces() -> Vec<Triangle> {
-    let latlong2xyz = |lat: f32, long: f32| crate::latlong2xyz(Coordinate { lat, long });
+    let latlong2xyz = |lat: f32, long: f32| crate::geo::latlong2xyz(Coordinate { lat, long });
 
     let mut triangles = Vec::with_capacity(20);
 
