@@ -154,10 +154,10 @@ fn error(c0: Coordinate, c1: Coordinate) -> f32 {
     let v0 = latlong2xyz(c0).to_vector();
     let v1 = latlong2xyz(c1).to_vector();
 
-    let midpoint_through_globe = midpoint_3d(v0, v1);
-    let midpoint_on_globe = latlong2xyz(midpoint(c0, c1)).to_vector();
+    let midpoint = midpoint_3d(v0, v1);
 
-    (midpoint_on_globe - midpoint_through_globe).length()
+    // The surface is always at distance 1.0 (sphere), so the error is the difference from that
+    (1.0 - midpoint.length()).abs()
 }
 
 /// Maps a geographical coordinate represented in radians onto a sphere
